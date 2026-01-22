@@ -3,12 +3,16 @@
 mod handlers;
 pub mod middleware;
 
-use axum::{Router, middleware::from_fn_with_state, routing::{any, get}};
+use axum::{
+    Router,
+    middleware::from_fn_with_state,
+    routing::{any, get},
+};
 use middleware::auth_middleware;
 use riley_core::{Riley, RileyConfig};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
 /// Application state shared across handlers
@@ -47,7 +51,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .layer(TraceLayer::new_for_http())
 }
 
-/// Build CORS layer from config
+/// Build CORS layer from config.
+///
+/// Defaults to denying all cross-origin requests if `cors_origins` is not configured.
+/// Set `cors_origins = ["*"]` to allow all origins, or specify explicit origins.
 fn build_cors_layer(config: &RileyConfig) -> CorsLayer {
     let origins = config
         .server
@@ -61,7 +68,8 @@ fn build_cors_layer(config: &RileyConfig) -> CorsLayer {
             let origins: Vec<_> = origins.iter().filter_map(|o| o.parse().ok()).collect();
             CorsLayer::new().allow_origin(origins)
         }
-        None => CorsLayer::new().allow_origin(Any),
+        // Default: deny all cross-origin requests (secure by default)
+        None => CorsLayer::new(),
     }
 }
 

@@ -102,6 +102,11 @@ impl Default for ServerConfig {
 pub struct WebhooksConfig {
     #[serde(default)]
     pub on_content_update: Vec<String>,
+    /// HMAC-SHA256 secret for signing webhook payloads.
+    /// When set, each webhook request includes an `X-Riley-Signature` header
+    /// with the hex-encoded HMAC-SHA256 of the request body.
+    /// Supports `"env:VAR_NAME"` syntax.
+    pub secret: Option<ConfigValue>,
 }
 
 /// Authentication configuration

@@ -40,32 +40,47 @@ impl ContentCache {
 
         let mut posts = HashMap::new();
         let mut series = HashMap::new();
+        let mut errors = 0u32;
 
         // Iterate through content directory
         for entry in fs::read_dir(&content_path)? {
-            let entry = entry?;
+            let entry = match entry {
+                Ok(e) => e,
+                Err(e) => {
+                    tracing::warn!("Failed to read directory entry: {}", e);
+                    errors += 1;
+                    continue;
+                }
+            };
             let path = entry.path();
 
             if !path.is_dir() {
                 continue;
             }
 
-            let slug = path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .ok_or_else(|| Error::Content {
-                    path: path.clone(),
-                    message: "Invalid directory name".to_string(),
-                })?
-                .to_string();
+            let slug = match path.file_name().and_then(|n| n.to_str()) {
+                Some(s) => s.to_string(),
+                None => {
+                    tracing::warn!("Skipping directory with invalid name: {:?}", path);
+                    errors += 1;
+                    continue;
+                }
+            };
 
             // Check if this is a series (has series.toml)
             let series_toml = path.join("series.toml");
             if series_toml.exists() {
-                let (series_data, series_posts) = Self::load_series(&path, &slug)?;
-                series.insert(slug.clone(), series_data);
-                for post in series_posts {
-                    posts.insert(post.slug.clone(), post);
+                match Self::load_series(&path, &slug) {
+                    Ok((series_data, series_posts)) => {
+                        series.insert(slug.clone(), series_data);
+                        for post in series_posts {
+                            posts.insert(post.slug.clone(), post);
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to load series '{}': {}", slug, e);
+                        errors += 1;
+                    }
                 }
             } else {
                 // Check if this is a post (has config.toml + content.mdx)
@@ -73,10 +88,32 @@ impl ContentCache {
                 let content_mdx = path.join("content.mdx");
 
                 if config_toml.exists() && content_mdx.exists() {
-                    let post = Self::load_post(&path, &slug, None)?;
-                    posts.insert(slug, post);
+                    match Self::load_post(&path, &slug, None) {
+                        Ok(post) => {
+                            posts.insert(slug, post);
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to load post '{}': {}", slug, e);
+                            errors += 1;
+                        }
+                    }
                 }
             }
+        }
+
+        if errors > 0 {
+            tracing::warn!(
+                "Content loaded with {} error(s): {} posts, {} series",
+                errors,
+                posts.len(),
+                series.len()
+            );
+        } else {
+            tracing::info!(
+                "Content loaded: {} posts, {} series",
+                posts.len(),
+                series.len()
+            );
         }
 
         let etag = Self::compute_etag(&posts, &series);
@@ -212,10 +249,13 @@ impl ContentCache {
         self.etag.clone()
     }
 
+    /// Maximum number of items returned in a single list request.
+    const MAX_PAGE_SIZE: usize = 500;
+
     /// List posts with filtering and pagination
     pub fn list_posts(&self, opts: &ListOptions) -> Result<ListResult<PostSummary>> {
         let now = Utc::now();
-        let limit = opts.limit.unwrap_or(50);
+        let limit = opts.limit.unwrap_or(50).min(Self::MAX_PAGE_SIZE);
         let offset = opts.offset.unwrap_or(0);
 
         let mut filtered: Vec<_> = self
@@ -256,7 +296,7 @@ impl ContentCache {
     /// List series with filtering and pagination
     pub fn list_series(&self, opts: &ListOptions) -> Result<ListResult<SeriesSummary>> {
         let now = Utc::now();
-        let limit = opts.limit.unwrap_or(50);
+        let limit = opts.limit.unwrap_or(50).min(Self::MAX_PAGE_SIZE);
         let offset = opts.offset.unwrap_or(0);
 
         let mut filtered: Vec<_> = self

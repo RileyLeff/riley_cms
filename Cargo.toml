@@ -44,17 +44,16 @@ clap = { version = "4.5", features = ["derive"] }
 aws-sdk-s3 = "1.68"
 aws-config = { version = "1.5", features = ["behavior-version-latest"] }
 
-# Git
-git2 = "0.19"
-
 # HTTP client (for webhooks)
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 
 # Utilities
 sha2 = "0.10"
+hmac = "0.12"
 hex = "0.4"
 dirs = "6.0"
 mime_guess = "2.0"
+subtle = "2.6"
 
 # Workspace crates
 riley-core = { path = "crates/riley-core" }

@@ -54,7 +54,11 @@ preview_text = "Preview for {}"
     )
     .unwrap();
 
-    fs::write(post_dir.join("content.mdx"), format!("# {}\n\nContent here.", title)).unwrap();
+    fs::write(
+        post_dir.join("content.mdx"),
+        format!("# {}\n\nContent here.", title),
+    )
+    .unwrap();
 }
 
 /// Helper to setup test environment and build router
@@ -79,7 +83,12 @@ async fn test_health_endpoint() {
     let app = setup_test_app(&temp_dir).await;
 
     let response = app
-        .oneshot(Request::builder().uri("/health").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri("/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
 
@@ -97,7 +106,12 @@ async fn test_list_posts_empty() {
     let app = setup_test_app(&temp_dir).await;
 
     let response = app
-        .oneshot(Request::builder().uri("/api/v1/posts").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/posts")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
 
@@ -115,12 +129,22 @@ async fn test_list_posts_with_live_content() {
     fs::create_dir_all(&content_dir).unwrap();
 
     // Create a live post (past date)
-    create_test_post(&content_dir, "live-post", "Live Post", Some("2020-01-01T00:00:00Z"));
+    create_test_post(
+        &content_dir,
+        "live-post",
+        "Live Post",
+        Some("2020-01-01T00:00:00Z"),
+    );
 
     let app = setup_test_app(&temp_dir).await;
 
     let response = app
-        .oneshot(Request::builder().uri("/api/v1/posts").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/posts")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
 
@@ -140,12 +164,22 @@ async fn test_list_posts_excludes_drafts_by_default() {
     // Create a draft post (no date)
     create_test_post(&content_dir, "draft-post", "Draft Post", None);
     // Create a live post
-    create_test_post(&content_dir, "live-post", "Live Post", Some("2020-01-01T00:00:00Z"));
+    create_test_post(
+        &content_dir,
+        "live-post",
+        "Live Post",
+        Some("2020-01-01T00:00:00Z"),
+    );
 
     let app = setup_test_app(&temp_dir).await;
 
     let response = app
-        .oneshot(Request::builder().uri("/api/v1/posts").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/posts")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
 
@@ -222,7 +256,12 @@ async fn test_drafts_with_valid_auth_returns_200() {
     fs::create_dir_all(&content_dir).unwrap();
 
     create_test_post(&content_dir, "draft-post", "Draft Post", None);
-    create_test_post(&content_dir, "live-post", "Live Post", Some("2020-01-01T00:00:00Z"));
+    create_test_post(
+        &content_dir,
+        "live-post",
+        "Live Post",
+        Some("2020-01-01T00:00:00Z"),
+    );
 
     let app = setup_test_app(&temp_dir).await;
 
@@ -324,7 +363,12 @@ async fn test_public_response_has_cache_headers() {
     let app = setup_test_app(&temp_dir).await;
 
     let response = app
-        .oneshot(Request::builder().uri("/api/v1/posts").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/posts")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
 
@@ -375,7 +419,12 @@ async fn test_get_single_post() {
     let content_dir = temp_dir.path().join("content");
     fs::create_dir_all(&content_dir).unwrap();
 
-    create_test_post(&content_dir, "my-post", "My Post", Some("2020-01-01T00:00:00Z"));
+    create_test_post(
+        &content_dir,
+        "my-post",
+        "My Post",
+        Some("2020-01-01T00:00:00Z"),
+    );
 
     let app = setup_test_app(&temp_dir).await;
 
@@ -662,8 +711,18 @@ async fn test_etag_is_full_sha256() {
 
     assert_eq!(response.status(), StatusCode::OK);
 
-    let etag = response.headers().get(header::ETAG).unwrap().to_str().unwrap();
+    let etag = response
+        .headers()
+        .get(header::ETAG)
+        .unwrap()
+        .to_str()
+        .unwrap();
     // Full SHA256 = 64 hex chars + 2 quotes = 66 chars
-    assert_eq!(etag.len(), 66, "ETag should be full SHA256 (64 hex chars + quotes), got: {}", etag);
+    assert_eq!(
+        etag.len(),
+        66,
+        "ETag should be full SHA256 (64 hex chars + quotes), got: {}",
+        etag
+    );
     assert!(etag.starts_with('"') && etag.ends_with('"'));
 }

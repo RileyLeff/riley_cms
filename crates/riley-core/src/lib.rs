@@ -81,6 +81,9 @@ pub use git::{GitBackend, GitCgiResponse};
 pub use storage::Storage;
 pub use types::*;
 
+use hmac::{Hmac, Mac};
+use sha2::Sha256;
+use std::net::ToSocketAddrs;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -188,9 +191,12 @@ impl Riley {
         Ok(cache.validate())
     }
 
-    /// List all assets in the S3/R2 storage bucket.
-    pub async fn list_assets(&self) -> Result<Vec<Asset>> {
-        self.storage.list_assets().await
+    /// List assets in the S3/R2 storage bucket with pagination.
+    ///
+    /// Uses cursor-based pagination via S3 continuation tokens.
+    /// Defaults to 100 assets per page, capped at 1000.
+    pub async fn list_assets(&self, opts: &AssetListOptions) -> Result<AssetListResult> {
+        self.storage.list_assets(opts).await
     }
 
     /// Upload a file to the storage bucket.
@@ -231,20 +237,31 @@ impl Riley {
     }
 
     /// Fire webhooks after content update.
+    ///
+    /// Validates webhook URLs against private/internal IP ranges to prevent SSRF.
+    /// If a `secret` is configured in `[webhooks]`, signs each request body with
+    /// HMAC-SHA256 and includes the hex signature in the `X-Riley-Signature` header.
+    /// Retries up to 3 times with exponential backoff on network errors or 5xx responses.
     pub async fn fire_webhooks(&self) {
         if let Some(ref webhooks) = self.config.webhooks {
+            // Resolve webhook secret once (if configured)
+            let secret = webhooks.secret.as_ref().and_then(|s| match s.resolve() {
+                Ok(v) => Some(v),
+                Err(e) => {
+                    tracing::warn!("Failed to resolve webhook secret: {}. Sending unsigned.", e);
+                    None
+                }
+            });
+
             for url in &webhooks.on_content_update {
+                if let Err(reason) = validate_webhook_url(url) {
+                    tracing::warn!("Skipping webhook {}: {}", url, reason);
+                    continue;
+                }
                 let url = url.clone();
+                let secret = secret.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = reqwest::Client::new()
-                        .post(&url)
-                        .header("Content-Type", "application/json")
-                        .body("{}")
-                        .send()
-                        .await
-                    {
-                        tracing::warn!("Webhook failed for {}: {}", url, e);
-                    }
+                    send_webhook(&url, secret.as_deref()).await;
                 });
             }
         }
@@ -254,4 +271,157 @@ impl Riley {
     pub fn config(&self) -> &RileyConfig {
         &self.config
     }
+}
+
+/// Validate a webhook URL to prevent SSRF attacks.
+///
+/// Rejects URLs that resolve to private, loopback, or link-local IP addresses.
+fn validate_webhook_url(url: &str) -> std::result::Result<(), String> {
+    // Parse the URL to extract host and port
+    let parsed = reqwest::Url::parse(url).map_err(|e| format!("invalid URL: {}", e))?;
+
+    let scheme = parsed.scheme();
+    if scheme != "http" && scheme != "https" {
+        return Err(format!("unsupported scheme: {}", scheme));
+    }
+
+    let host = parsed.host_str().ok_or("missing host")?;
+    let port = parsed.port_or_known_default().unwrap_or(443);
+
+    // Resolve the hostname and check all resulting IPs
+    let addr_str = format!("{}:{}", host, port);
+    let addrs: Vec<_> = addr_str
+        .to_socket_addrs()
+        .map_err(|e| format!("DNS resolution failed: {}", e))?
+        .collect();
+
+    if addrs.is_empty() {
+        return Err("hostname did not resolve to any addresses".to_string());
+    }
+
+    for addr in &addrs {
+        let ip = addr.ip();
+        if ip.is_loopback() || ip.is_unspecified() || is_private_ip(&ip) || is_link_local(&ip) {
+            return Err(format!("resolves to private/internal IP: {}", ip));
+        }
+    }
+
+    Ok(())
+}
+
+/// Check if an IP address is in a private range (RFC 1918 / RFC 4193).
+fn is_private_ip(ip: &std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v4) => {
+            let octets = v4.octets();
+            // 10.0.0.0/8
+            octets[0] == 10
+            // 172.16.0.0/12
+            || (octets[0] == 172 && (16..=31).contains(&octets[1]))
+            // 192.168.0.0/16
+            || (octets[0] == 192 && octets[1] == 168)
+            // 100.64.0.0/10 (Carrier-grade NAT)
+            || (octets[0] == 100 && (64..=127).contains(&octets[1]))
+        }
+        std::net::IpAddr::V6(v6) => {
+            let segments = v6.segments();
+            // fc00::/7 (Unique Local Addresses)
+            (segments[0] & 0xfe00) == 0xfc00
+        }
+    }
+}
+
+/// Check if an IP address is link-local (169.254.0.0/16 or fe80::/10).
+fn is_link_local(ip: &std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v4) => {
+            let octets = v4.octets();
+            // 169.254.0.0/16 (includes AWS metadata endpoint 169.254.169.254)
+            octets[0] == 169 && octets[1] == 254
+        }
+        std::net::IpAddr::V6(v6) => {
+            let segments = v6.segments();
+            // fe80::/10
+            (segments[0] & 0xffc0) == 0xfe80
+        }
+    }
+}
+
+/// Maximum number of retry attempts for webhook delivery.
+const WEBHOOK_MAX_RETRIES: u32 = 3;
+
+/// Send a single webhook with optional HMAC signing and retry with exponential backoff.
+///
+/// Retries on network errors or 5xx responses. Does not retry on 4xx (client errors)
+/// since those indicate a problem with the receiver's configuration, not a transient issue.
+async fn send_webhook(url: &str, secret: Option<&str>) {
+    let body = "{}";
+
+    // Compute HMAC signature if secret is configured
+    let signature = secret.and_then(|s| {
+        let mut mac = Hmac::<Sha256>::new_from_slice(s.as_bytes())
+            .map_err(|e| tracing::warn!("Invalid webhook secret key: {}. Sending unsigned.", e))
+            .ok()?;
+        mac.update(body.as_bytes());
+        Some(hex::encode(mac.finalize().into_bytes()))
+    });
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+
+    for attempt in 0..WEBHOOK_MAX_RETRIES {
+        let mut request = client
+            .post(url)
+            .header("Content-Type", "application/json")
+            .body(body);
+
+        if let Some(ref sig) = signature {
+            request = request.header("X-Riley-Signature", format!("sha256={}", sig));
+        }
+
+        match request.send().await {
+            Ok(response) if response.status().is_success() => return,
+            Ok(response) if response.status().is_client_error() => {
+                // 4xx: don't retry, receiver has a config problem
+                tracing::warn!(
+                    "Webhook {} returned {} (not retrying)",
+                    url,
+                    response.status()
+                );
+                return;
+            }
+            Ok(response) => {
+                // 5xx or other: retry
+                tracing::warn!(
+                    "Webhook {} returned {} (attempt {}/{})",
+                    url,
+                    response.status(),
+                    attempt + 1,
+                    WEBHOOK_MAX_RETRIES
+                );
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Webhook {} failed: {} (attempt {}/{})",
+                    url,
+                    e,
+                    attempt + 1,
+                    WEBHOOK_MAX_RETRIES
+                );
+            }
+        }
+
+        // Exponential backoff: 1s, 2s, 4s
+        if attempt < WEBHOOK_MAX_RETRIES - 1 {
+            tokio::time::sleep(std::time::Duration::from_secs(1 << attempt)).await;
+        }
+    }
+
+    tracing::error!(
+        "Webhook {} failed after {} attempts",
+        url,
+        WEBHOOK_MAX_RETRIES
+    );
 }

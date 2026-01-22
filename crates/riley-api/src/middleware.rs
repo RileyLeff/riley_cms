@@ -9,6 +9,7 @@ use axum::{
     response::Response,
 };
 use std::sync::Arc;
+use subtle::ConstantTimeEq;
 
 use crate::AppState;
 
@@ -42,16 +43,26 @@ pub async fn auth_middleware(
     if let Some(ref auth_config) = state.config.auth {
         if let Some(ref token_config) = auth_config.api_token {
             // Resolve the token (supports "env:VAR_NAME" syntax)
-            if let Ok(expected_token) = token_config.resolve() {
-                // Check Authorization header for Bearer token
-                if let Some(auth_header) = request.headers().get(header::AUTHORIZATION) {
-                    if let Ok(auth_str) = auth_header.to_str() {
-                        if let Some(provided_token) = auth_str.strip_prefix("Bearer ") {
-                            if provided_token.trim() == expected_token {
-                                auth_status = AuthStatus::Admin;
+            match token_config.resolve() {
+                Ok(expected_token) => {
+                    // Check Authorization header for Bearer token
+                    if let Some(auth_header) = request.headers().get(header::AUTHORIZATION) {
+                        if let Ok(auth_str) = auth_header.to_str() {
+                            if let Some(provided_token) = auth_str.strip_prefix("Bearer ") {
+                                let provided = provided_token.trim().as_bytes();
+                                let expected = expected_token.as_bytes();
+                                // Use constant-time comparison to prevent timing attacks
+                                if provided.len() == expected.len()
+                                    && provided.ct_eq(expected).into()
+                                {
+                                    auth_status = AuthStatus::Admin;
+                                }
                             }
                         }
                     }
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to resolve API token: {}. Admin auth disabled.", e);
                 }
             }
         }

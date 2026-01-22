@@ -140,6 +140,25 @@ pub struct ListResult<T> {
     pub offset: usize,
 }
 
+/// Options for listing assets with pagination
+#[derive(Debug, Clone, Default)]
+pub struct AssetListOptions {
+    /// Maximum number of assets to return (default 100, max 1000)
+    pub limit: Option<usize>,
+    /// Continuation token from a previous response for fetching the next page
+    pub continuation_token: Option<String>,
+}
+
+/// Paginated asset list result
+#[derive(Debug, Clone, Serialize)]
+pub struct AssetListResult {
+    pub assets: Vec<Asset>,
+    /// Token to pass as `continuation_token` to fetch the next page.
+    /// `None` means there are no more results.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_continuation_token: Option<String>,
+}
+
 /// Content validation error
 #[derive(Debug, Clone, Serialize)]
 pub struct ValidationError {

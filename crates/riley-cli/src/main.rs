@@ -247,12 +247,13 @@ async fn cmd_ls(config_path: Option<&std::path::Path>, what: LsCommands) -> Resu
             }
         }
         LsCommands::Assets => {
-            let assets = riley.list_assets().await?;
+            let mut total = 0usize;
+            let mut opts = riley_core::AssetListOptions::default();
 
-            if assets.is_empty() {
-                println!("No assets found.");
-            } else {
-                for asset in &assets {
+            loop {
+                let result = riley.list_assets(&opts).await?;
+
+                for asset in &result.assets {
                     let size = format_size(asset.size);
                     println!(
                         "{:>8}  {}  {}",
@@ -261,7 +262,18 @@ async fn cmd_ls(config_path: Option<&std::path::Path>, what: LsCommands) -> Resu
                         asset.key
                     );
                 }
-                println!("\nTotal: {} assets", assets.len());
+                total += result.assets.len();
+
+                match result.next_continuation_token {
+                    Some(token) => opts.continuation_token = Some(token),
+                    None => break,
+                }
+            }
+
+            if total == 0 {
+                println!("No assets found.");
+            } else {
+                println!("\nTotal: {} assets", total);
             }
         }
     }

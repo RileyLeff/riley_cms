@@ -27,6 +27,7 @@ tower-http = { workspace = true }
 anyhow = { workspace = true }
 base64 = "0.22"
 http-body-util = "0.1"
+subtle = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3.19"

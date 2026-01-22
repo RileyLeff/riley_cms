@@ -78,7 +78,10 @@ impl GitBackend {
     ) -> Result<GitCgiResponse> {
         // Build CGI environment variables
         let mut env = HashMap::new();
-        env.insert("GIT_PROJECT_ROOT".to_string(), self.repo_path.to_string_lossy().to_string());
+        env.insert(
+            "GIT_PROJECT_ROOT".to_string(),
+            self.repo_path.to_string_lossy().to_string(),
+        );
         env.insert("GIT_HTTP_EXPORT_ALL".to_string(), "1".to_string());
         env.insert("PATH_INFO".to_string(), path_info.to_string());
         env.insert("REQUEST_METHOD".to_string(), method.to_string());

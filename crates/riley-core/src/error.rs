@@ -43,9 +43,3 @@ pub enum Error {
     #[error("S3 error: {0}")]
     S3(String),
 }
-
-impl From<git2::Error> for Error {
-    fn from(e: git2::Error) -> Self {
-        Error::Git(e.message().to_string())
-    }
-}

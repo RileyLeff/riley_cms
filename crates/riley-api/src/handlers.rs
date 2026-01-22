@@ -1,7 +1,7 @@
 //! HTTP request handlers for riley-api
 
-use crate::middleware::AuthStatus;
 use crate::AppState;
+use crate::middleware::AuthStatus;
 use axum::{
     Extension, Json,
     extract::{Path, Query, State},
@@ -40,10 +40,14 @@ struct ErrorResponse {
     error: String,
 }
 
-/// Convert internal errors to HTTP responses
-fn internal_error(msg: impl std::fmt::Display) -> Response {
+/// Convert internal errors to HTTP responses.
+///
+/// Logs the actual error server-side but returns a generic message to clients
+/// to avoid leaking internal details (file paths, S3 errors, etc.).
+fn internal_error(err: impl std::fmt::Display) -> Response {
+    tracing::error!("Internal error: {}", err);
     let body = Json(ErrorResponse {
-        error: msg.to_string(),
+        error: "Internal server error".to_string(),
     });
     (StatusCode::INTERNAL_SERVER_ERROR, body).into_response()
 }
@@ -101,9 +105,9 @@ fn is_content_visible(
         return true;
     }
     match goes_live_at {
-        None => false,                                  // Draft
+        None => false,                                    // Draft
         Some(date) if date > chrono::Utc::now() => false, // Scheduled
-        Some(_) => true,                                // Live
+        Some(_) => true,                                  // Live
     }
 }
 
@@ -202,7 +206,9 @@ pub async fn get_post_raw(
 
             headers.insert(
                 header::CONTENT_TYPE,
-                "text/plain; charset=utf-8".parse().expect("valid static header"),
+                "text/plain; charset=utf-8"
+                    .parse()
+                    .expect("valid static header"),
             );
 
             if is_admin {
@@ -295,24 +301,37 @@ pub async fn get_series(
                 return not_found_response(&slug, "Series");
             }
             let etag = state.riley.content_etag().await;
-            with_cache_headers(Json(series), &state, &etag, auth_status == AuthStatus::Admin)
+            with_cache_headers(
+                Json(series),
+                &state,
+                &etag,
+                auth_status == AuthStatus::Admin,
+            )
         }
         Ok(None) => not_found_response(&slug, "Series"),
         Err(e) => internal_error(e),
     }
 }
 
-/// GET /assets - List assets in storage
-pub async fn list_assets(State(state): State<Arc<AppState>>) -> Response {
-    match state.riley.list_assets().await {
-        Ok(assets) => {
-            #[derive(Serialize)]
-            struct AssetsResponse {
-                assets: Vec<riley_core::Asset>,
-            }
+/// Query parameters for asset list endpoint
+#[derive(Debug, Clone, Deserialize)]
+pub struct AssetListQuery {
+    pub limit: Option<usize>,
+    pub continuation_token: Option<String>,
+}
 
-            Json(AssetsResponse { assets }).into_response()
-        }
+/// GET /assets - List assets in storage with pagination
+pub async fn list_assets(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<AssetListQuery>,
+) -> Response {
+    let opts = riley_core::AssetListOptions {
+        limit: query.limit,
+        continuation_token: query.continuation_token,
+    };
+
+    match state.riley.list_assets(&opts).await {
+        Ok(result) => Json(result).into_response(),
         Err(e) => internal_error(e),
     }
 }
@@ -333,6 +352,7 @@ use axum::http::HeaderMap;
 use base64::Engine;
 use http_body_util::BodyExt;
 use riley_core::GitBackend;
+use subtle::ConstantTimeEq;
 
 /// Check Basic Auth for Git operations
 ///
@@ -344,7 +364,10 @@ fn check_git_basic_auth(headers: &HeaderMap, state: &AppState) -> bool {
         Some(auth) => match &auth.git_token {
             Some(token_config) => match token_config.resolve() {
                 Ok(token) => token,
-                Err(_) => return false,
+                Err(e) => {
+                    tracing::warn!("Failed to resolve git token: {}. Git auth disabled.", e);
+                    return false;
+                }
             },
             None => return false, // No git_token configured, deny access
         },
@@ -381,7 +404,10 @@ fn check_git_basic_auth(headers: &HeaderMap, state: &AppState) -> bool {
     // Format: "username:password" - we only check password (the token)
     // Username can be anything (commonly "git" or the actual username)
     if let Some((_username, password)) = credentials.split_once(':') {
-        password == expected_token
+        // Use constant-time comparison to prevent timing attacks
+        let provided = password.as_bytes();
+        let expected = expected_token.as_bytes();
+        provided.len() == expected.len() && provided.ct_eq(expected).into()
     } else {
         false
     }
@@ -430,10 +456,11 @@ pub async fn git_handler(
     let body = match request.into_body().collect().await {
         Ok(collected) => collected.to_bytes(),
         Err(e) => {
+            tracing::warn!("Failed to read git request body: {}", e);
             return (
                 StatusCode::BAD_REQUEST,
                 Json(ErrorResponse {
-                    error: format!("Failed to read request body: {}", e),
+                    error: "Failed to read request body".to_string(),
                 }),
             )
                 .into_response();
@@ -467,7 +494,11 @@ pub async fn git_handler(
 
     // Get the content repository path and optional git backend path
     let repo_path = &state.config.content.repo_path;
-    let backend_path = state.config.git.as_ref().and_then(|g| g.backend_path.clone());
+    let backend_path = state
+        .config
+        .git
+        .as_ref()
+        .and_then(|g| g.backend_path.clone());
     let backend = GitBackend::with_backend_path(repo_path, backend_path);
 
     // Check if repo exists
@@ -521,9 +552,19 @@ pub async fn git_handler(
                 }
             }
 
-            let response = response_builder
-                .body(axum::body::Body::from(cgi_response.body))
-                .expect("valid response from CGI headers");
+            let response = match response_builder.body(axum::body::Body::from(cgi_response.body)) {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::error!("Failed to build response from CGI output: {}", e);
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(ErrorResponse {
+                            error: "Git operation failed".to_string(),
+                        }),
+                    )
+                        .into_response();
+                }
+            };
 
             // If this was a successful push, refresh the cache and fire webhooks
             if is_write_operation && status.is_success() {
@@ -543,7 +584,7 @@ pub async fn git_handler(
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ErrorResponse {
-                    error: format!("Git operation failed: {}", e),
+                    error: "Git operation failed".to_string(),
                 }),
             )
                 .into_response()
