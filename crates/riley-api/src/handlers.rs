@@ -1,8 +1,9 @@
 //! HTTP request handlers for riley-api
 
+use crate::middleware::AuthStatus;
 use crate::AppState;
 use axum::{
-    Json,
+    Extension, Json,
     extract::{Path, Query, State},
     http::{StatusCode, header},
     response::{IntoResponse, Response},
@@ -91,10 +92,23 @@ fn is_authenticated_request(query: &ListQuery) -> bool {
 /// GET /posts - List all posts
 pub async fn list_posts(
     State(state): State<Arc<AppState>>,
+    Extension(auth_status): Extension<AuthStatus>,
     Query(query): Query<ListQuery>,
 ) -> Response {
-    let opts: ListOptions = query.clone().into();
-    let is_auth = is_authenticated_request(&query);
+    let is_auth_required = is_authenticated_request(&query);
+
+    // Security check: require authentication for drafts/scheduled content
+    if is_auth_required && auth_status != AuthStatus::Admin {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(ErrorResponse {
+                error: "Authentication required for drafts/scheduled content".to_string(),
+            }),
+        )
+            .into_response();
+    }
+
+    let opts: ListOptions = query.into();
 
     match state.riley.list_posts(&opts).await {
         Ok(result) => {
@@ -115,7 +129,7 @@ pub async fn list_posts(
                 offset: result.offset,
             });
 
-            with_cache_headers(response, &state, &etag, is_auth)
+            with_cache_headers(response, &state, &etag, is_auth_required)
         }
         Err(e) => internal_error(e),
     }
@@ -185,10 +199,23 @@ pub async fn get_post_raw(
 /// GET /series - List all series
 pub async fn list_series(
     State(state): State<Arc<AppState>>,
+    Extension(auth_status): Extension<AuthStatus>,
     Query(query): Query<ListQuery>,
 ) -> Response {
-    let opts: ListOptions = query.clone().into();
-    let is_auth = is_authenticated_request(&query);
+    let is_auth_required = is_authenticated_request(&query);
+
+    // Security check: require authentication for drafts/scheduled content
+    if is_auth_required && auth_status != AuthStatus::Admin {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(ErrorResponse {
+                error: "Authentication required for drafts/scheduled content".to_string(),
+            }),
+        )
+            .into_response();
+    }
+
+    let opts: ListOptions = query.into();
 
     match state.riley.list_series(&opts).await {
         Ok(result) => {
@@ -209,7 +236,7 @@ pub async fn list_series(
                 offset: result.offset,
             });
 
-            with_cache_headers(response, &state, &etag, is_auth)
+            with_cache_headers(response, &state, &etag, is_auth_required)
         }
         Err(e) => internal_error(e),
     }
@@ -255,4 +282,185 @@ pub async fn health() -> Response {
     }
 
     Json(HealthResponse { status: "ok" }).into_response()
+}
+
+// === Git Smart HTTP Handlers ===
+
+use axum::http::HeaderMap;
+use base64::Engine;
+use http_body_util::BodyExt;
+use riley_core::GitBackend;
+
+/// Check Basic Auth for Git operations
+///
+/// Git clients typically use Basic Auth (not Bearer tokens).
+/// Returns true if authentication is valid.
+fn check_git_basic_auth(headers: &HeaderMap, state: &AppState) -> bool {
+    // Get the configured git_token
+    let expected_token = match &state.config.auth {
+        Some(auth) => match &auth.git_token {
+            Some(token_config) => match token_config.resolve() {
+                Ok(token) => token,
+                Err(_) => return false,
+            },
+            None => return false, // No git_token configured, deny access
+        },
+        None => return false, // No auth configured, deny access
+    };
+
+    // Parse Basic Auth header
+    let auth_header = match headers.get(header::AUTHORIZATION) {
+        Some(h) => h,
+        None => return false,
+    };
+
+    let auth_str = match auth_header.to_str() {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+
+    // Format: "Basic base64(username:password)"
+    let encoded = match auth_str.strip_prefix("Basic ") {
+        Some(e) => e,
+        None => return false,
+    };
+
+    let decoded = match base64::engine::general_purpose::STANDARD.decode(encoded) {
+        Ok(d) => d,
+        Err(_) => return false,
+    };
+
+    let credentials = match String::from_utf8(decoded) {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+
+    // Format: "username:password" - we only check password (the token)
+    // Username can be anything (commonly "git" or the actual username)
+    if let Some((_username, password)) = credentials.split_once(':') {
+        password == expected_token
+    } else {
+        false
+    }
+}
+
+/// Git Smart HTTP handler
+///
+/// Handles all Git HTTP protocol requests by proxying to git-http-backend.
+/// Supports both read (fetch/clone) and write (push) operations.
+pub async fn git_handler(
+    State(state): State<Arc<AppState>>,
+    Path(path): Path<String>,
+    request: axum::http::Request<axum::body::Body>,
+) -> Response {
+    let method = request.method().clone();
+    let headers = request.headers().clone();
+    let uri = request.uri().clone();
+
+    // Extract body
+    let body = match request.into_body().collect().await {
+        Ok(collected) => collected.to_bytes(),
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse {
+                    error: format!("Failed to read request body: {}", e),
+                }),
+            )
+                .into_response();
+        }
+    };
+    // Check Basic Auth
+    if !check_git_basic_auth(&headers, &state) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            [(header::WWW_AUTHENTICATE, "Basic realm=\"Git\"")],
+            "Authentication required",
+        )
+            .into_response();
+    }
+
+    // Get the content repository path
+    let repo_path = &state.config.content.repo_path;
+    let backend = GitBackend::new(repo_path);
+
+    // Check if repo exists
+    if !backend.is_valid_repo() {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: "Git repository not found".to_string(),
+            }),
+        )
+            .into_response();
+    }
+
+    // Build path_info (the path after /git/)
+    let path_info = format!("/{}", path);
+
+    // Extract query string from URI
+    let query_string = uri.query().map(String::from);
+
+    // Get content type
+    let content_type = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|h| h.to_str().ok())
+        .map(String::from);
+
+    // Determine if this is a write operation (push)
+    let is_write_operation = path.contains("git-receive-pack");
+
+    // Run the Git CGI backend
+    match backend
+        .run_cgi(
+            method.as_str(),
+            &path_info,
+            query_string.as_deref(),
+            content_type.as_deref(),
+            &body,
+        )
+        .await
+    {
+        Ok(cgi_response) => {
+            let status = StatusCode::from_u16(cgi_response.status).unwrap_or(StatusCode::OK);
+
+            let mut response_builder = Response::builder().status(status);
+
+            // Copy headers from CGI response
+            for (key, value) in &cgi_response.headers {
+                if let Ok(header_name) = key.parse::<axum::http::header::HeaderName>() {
+                    if let Ok(header_value) = value.parse::<axum::http::header::HeaderValue>() {
+                        response_builder = response_builder.header(header_name, header_value);
+                    }
+                }
+            }
+
+            let response = response_builder
+                .body(axum::body::Body::from(cgi_response.body))
+                .unwrap();
+
+            // If this was a successful push, refresh the cache and fire webhooks
+            if is_write_operation && status.is_success() {
+                let state_clone = state.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = state_clone.riley.refresh().await {
+                        tracing::error!("Failed to refresh content after git push: {}", e);
+                    }
+                    state_clone.riley.fire_webhooks().await;
+                });
+            }
+
+            response
+        }
+        Err(e) => {
+            tracing::error!("Git CGI error: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: format!("Git operation failed: {}", e),
+                }),
+            )
+                .into_response()
+        }
+    }
 }

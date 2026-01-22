@@ -1,9 +1,10 @@
 //! riley-api: HTTP API server for riley_cms
 
 mod handlers;
-mod middleware;
+pub mod middleware;
 
-use axum::{Router, routing::get};
+use axum::{Router, middleware::from_fn_with_state, routing::{any, get}};
+use middleware::auth_middleware;
 use riley_core::{Riley, RileyConfig};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -30,7 +31,11 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/assets", get(handlers::list_assets))
         // Health check
         .route("/health", get(handlers::health))
-        // State and middleware
+        // Git Smart HTTP routes (uses Basic Auth, not Bearer token)
+        .route("/git/{*path}", any(handlers::git_handler))
+        // Auth middleware - runs on all routes, sets AuthStatus in extensions
+        .layer(from_fn_with_state(state.clone(), auth_middleware))
+        // State and other middleware
         .with_state(state)
         .layer(cors)
         .layer(TraceLayer::new_for_http())

@@ -70,12 +70,14 @@
 mod config;
 mod content;
 mod error;
+pub mod git;
 mod storage;
 mod types;
 
 pub use config::{Config, RileyConfig, resolve_config};
 pub use content::ContentCache;
 pub use error::{Error, Result};
+pub use git::{GitBackend, GitCgiResponse};
 pub use storage::Storage;
 pub use types::*;
 
@@ -124,7 +126,14 @@ impl Riley {
     /// Returns an error if content cannot be loaded or S3 configuration is invalid.
     pub async fn from_config(config: RileyConfig) -> Result<Self> {
         let storage = Storage::new(&config.storage).await?;
-        let cache = ContentCache::load(&config.content)?;
+
+        // Clone content config to move into the blocking task closure
+        let content_config = config.content.clone();
+
+        // Offload blocking filesystem I/O to a dedicated thread pool
+        let cache = tokio::task::spawn_blocking(move || ContentCache::load(&content_config))
+            .await
+            .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))??;
 
         Ok(Self {
             config,
@@ -199,7 +208,14 @@ impl Riley {
     /// Call this after content has been updated (e.g., after a git push)
     /// to reload the in-memory cache.
     pub async fn refresh(&self) -> Result<()> {
-        let new_cache = ContentCache::load(&self.config.content)?;
+        // Clone the config to move into the blocking task closure
+        let content_config = self.config.content.clone();
+
+        // Offload blocking filesystem I/O to a dedicated thread pool
+        let new_cache = tokio::task::spawn_blocking(move || ContentCache::load(&content_config))
+            .await
+            .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))??;
+
         let mut cache = self.cache.write().await;
         *cache = new_cache;
         Ok(())

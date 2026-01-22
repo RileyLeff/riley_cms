@@ -137,6 +137,7 @@ goes_live_at = 2025-01-15T00:00:00Z
 | `GET /series/:slug` | Get series with ordered posts |
 | `GET /assets` | List assets in bucket |
 | `GET /health` | Health check |
+| `* /git/{*path}` | Git Smart HTTP (requires Basic Auth) |
 
 ### Query Parameters
 
@@ -144,6 +145,71 @@ goes_live_at = 2025-01-15T00:00:00Z
 - `?include_scheduled=true` - Include future-dated posts (requires auth)
 - `?limit=N` - Limit results (default: 50)
 - `?offset=N` - Skip results for pagination
+
+## Authentication
+
+riley_cms supports two authentication mechanisms:
+
+### API Token (Bearer)
+
+For accessing drafts and scheduled content via the API:
+
+```bash
+curl -H "Authorization: Bearer your-api-token" \
+  "http://localhost:8080/posts?include_drafts=true"
+```
+
+Configure in `riley_cms.toml`:
+
+```toml
+[auth]
+api_token = "env:API_TOKEN"  # Read from environment variable
+# or
+api_token = "your-literal-token"
+```
+
+### Git Token (Basic Auth)
+
+For pushing content via Git over HTTP:
+
+```bash
+git remote add origin http://git:your-token@localhost:8080/git/content
+git push origin main
+```
+
+Configure in `riley_cms.toml`:
+
+```toml
+[auth]
+git_token = "env:GIT_AUTH_TOKEN"
+```
+
+## Git Server
+
+riley_cms can serve your content repository over HTTP, allowing you to push content updates directly to the server.
+
+### Setup
+
+1. Initialize a bare git repo in your content directory (or use an existing one)
+2. Configure the `git_token` in your config
+3. Add the remote to your local clone:
+
+```bash
+# On your local machine
+git remote add cms http://git:your-token@your-server:8080/git/content
+git push cms main
+```
+
+### Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /git/{*path}` | Git read operations (fetch/clone) |
+| `POST /git/{*path}` | Git write operations (push) |
+
+After a successful push, riley_cms automatically:
+1. Refreshes the content cache
+2. Fires any configured webhooks
 
 ### Response Example
 
