@@ -10,8 +10,16 @@ pub struct RileyConfig {
     pub content: ContentConfig,
     pub storage: StorageConfig,
     pub server: Option<ServerConfig>,
+    pub git: Option<GitConfig>,
     pub webhooks: Option<WebhooksConfig>,
     pub auth: Option<AuthConfig>,
+}
+
+/// Git configuration
+#[derive(Debug, Clone, Deserialize)]
+pub struct GitConfig {
+    /// Explicit path to git-http-backend binary (optional, auto-discovered if not set)
+    pub backend_path: Option<PathBuf>,
 }
 
 /// Content repository configuration

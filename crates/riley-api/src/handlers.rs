@@ -59,7 +59,10 @@ fn with_cache_headers(
     let headers = response.headers_mut();
 
     if is_authenticated {
-        headers.insert(header::CACHE_CONTROL, "private, no-store".parse().unwrap());
+        headers.insert(
+            header::CACHE_CONTROL,
+            "private, no-store".parse().expect("valid static header"),
+        );
     } else {
         let server = state.config.server.as_ref();
         let max_age = server.map(|s| s.cache_max_age).unwrap_or(60);
@@ -74,9 +77,9 @@ fn with_cache_headers(
                 max_age, swr
             )
             .parse()
-            .unwrap(),
+            .expect("valid cache-control header"),
         );
-        headers.insert(header::ETAG, etag.parse().unwrap());
+        headers.insert(header::ETAG, etag.parse().expect("valid etag header"));
     }
 
     response
@@ -85,6 +88,31 @@ fn with_cache_headers(
 /// Check if request requires authentication (has include_drafts or include_scheduled)
 fn is_authenticated_request(query: &ListQuery) -> bool {
     query.include_drafts || query.include_scheduled
+}
+
+/// Check if content is visible based on goes_live_at and auth status.
+/// Live content (goes_live_at in the past) is always visible.
+/// Drafts (None) and scheduled (future) require admin auth.
+fn is_content_visible(
+    goes_live_at: Option<chrono::DateTime<chrono::Utc>>,
+    auth_status: AuthStatus,
+) -> bool {
+    if auth_status == AuthStatus::Admin {
+        return true;
+    }
+    match goes_live_at {
+        None => false,                                  // Draft
+        Some(date) if date > chrono::Utc::now() => false, // Scheduled
+        Some(_) => true,                                // Live
+    }
+}
+
+/// Generate a standard not-found response
+fn not_found_response(slug: &str, kind: &str) -> Response {
+    let body = Json(ErrorResponse {
+        error: format!("{} not found: {}", kind, slug),
+    });
+    (StatusCode::NOT_FOUND, body).into_response()
 }
 
 // === Handlers ===
@@ -136,18 +164,21 @@ pub async fn list_posts(
 }
 
 /// GET /posts/:slug - Get a single post
-pub async fn get_post(State(state): State<Arc<AppState>>, Path(slug): Path<String>) -> Response {
+pub async fn get_post(
+    State(state): State<Arc<AppState>>,
+    Extension(auth_status): Extension<AuthStatus>,
+    Path(slug): Path<String>,
+) -> Response {
     match state.riley.get_post(&slug).await {
         Ok(Some(post)) => {
+            // Visibility check: drafts/scheduled posts require admin auth
+            if !is_content_visible(post.goes_live_at, auth_status) {
+                return not_found_response(&slug, "Post");
+            }
             let etag = state.riley.content_etag().await;
-            with_cache_headers(Json(post), &state, &etag, false)
+            with_cache_headers(Json(post), &state, &etag, auth_status == AuthStatus::Admin)
         }
-        Ok(None) => {
-            let body = Json(ErrorResponse {
-                error: format!("Post not found: {}", slug),
-            });
-            (StatusCode::NOT_FOUND, body).into_response()
-        }
+        Ok(None) => not_found_response(&slug, "Post"),
         Err(e) => internal_error(e),
     }
 }
@@ -155,43 +186,52 @@ pub async fn get_post(State(state): State<Arc<AppState>>, Path(slug): Path<Strin
 /// GET /posts/:slug/raw - Get raw MDX content only
 pub async fn get_post_raw(
     State(state): State<Arc<AppState>>,
+    Extension(auth_status): Extension<AuthStatus>,
     Path(slug): Path<String>,
 ) -> Response {
     match state.riley.get_post(&slug).await {
         Ok(Some(post)) => {
+            // Visibility check: drafts/scheduled posts require admin auth
+            if !is_content_visible(post.goes_live_at, auth_status) {
+                return not_found_response(&slug, "Post");
+            }
+            let is_admin = auth_status == AuthStatus::Admin;
             let etag = state.riley.content_etag().await;
             let mut response = post.content.into_response();
             let headers = response.headers_mut();
 
-            let server = state.config.server.as_ref();
-            let max_age = server.map(|s| s.cache_max_age).unwrap_or(60);
-            let swr = server
-                .map(|s| s.cache_stale_while_revalidate)
-                .unwrap_or(300);
-
             headers.insert(
                 header::CONTENT_TYPE,
-                "text/plain; charset=utf-8".parse().unwrap(),
+                "text/plain; charset=utf-8".parse().expect("valid static header"),
             );
-            headers.insert(
-                header::CACHE_CONTROL,
-                format!(
-                    "public, max-age={}, stale-while-revalidate={}",
-                    max_age, swr
-                )
-                .parse()
-                .unwrap(),
-            );
-            headers.insert(header::ETAG, etag.parse().unwrap());
+
+            if is_admin {
+                headers.insert(
+                    header::CACHE_CONTROL,
+                    "private, no-store".parse().expect("valid static header"),
+                );
+            } else {
+                let server = state.config.server.as_ref();
+                let max_age = server.map(|s| s.cache_max_age).unwrap_or(60);
+                let swr = server
+                    .map(|s| s.cache_stale_while_revalidate)
+                    .unwrap_or(300);
+
+                headers.insert(
+                    header::CACHE_CONTROL,
+                    format!(
+                        "public, max-age={}, stale-while-revalidate={}",
+                        max_age, swr
+                    )
+                    .parse()
+                    .expect("valid cache-control header"),
+                );
+                headers.insert(header::ETAG, etag.parse().expect("valid etag header"));
+            }
 
             response
         }
-        Ok(None) => {
-            let body = Json(ErrorResponse {
-                error: format!("Post not found: {}", slug),
-            });
-            (StatusCode::NOT_FOUND, body).into_response()
-        }
+        Ok(None) => not_found_response(&slug, "Post"),
         Err(e) => internal_error(e),
     }
 }
@@ -243,18 +283,21 @@ pub async fn list_series(
 }
 
 /// GET /series/:slug - Get a single series with posts
-pub async fn get_series(State(state): State<Arc<AppState>>, Path(slug): Path<String>) -> Response {
+pub async fn get_series(
+    State(state): State<Arc<AppState>>,
+    Extension(auth_status): Extension<AuthStatus>,
+    Path(slug): Path<String>,
+) -> Response {
     match state.riley.get_series(&slug).await {
         Ok(Some(series)) => {
+            // Visibility check: drafts/scheduled series require admin auth
+            if !is_content_visible(series.goes_live_at, auth_status) {
+                return not_found_response(&slug, "Series");
+            }
             let etag = state.riley.content_etag().await;
-            with_cache_headers(Json(series), &state, &etag, false)
+            with_cache_headers(Json(series), &state, &etag, auth_status == AuthStatus::Admin)
         }
-        Ok(None) => {
-            let body = Json(ErrorResponse {
-                error: format!("Series not found: {}", slug),
-            });
-            (StatusCode::NOT_FOUND, body).into_response()
-        }
+        Ok(None) => not_found_response(&slug, "Series"),
         Err(e) => internal_error(e),
     }
 }
@@ -344,6 +387,20 @@ fn check_git_basic_auth(headers: &HeaderMap, state: &AppState) -> bool {
     }
 }
 
+/// Maximum allowed body size for git operations (100 MB)
+const GIT_MAX_BODY_SIZE: usize = 100 * 1024 * 1024;
+
+/// Validate that a git path is safe (no traversal, no injection)
+fn is_valid_git_path(path: &str) -> bool {
+    // Reject path traversal
+    if path.contains("..") {
+        return false;
+    }
+    // Only allow alphanumeric, hyphens, underscores, dots, forward slashes, and query-safe chars
+    path.chars()
+        .all(|c| c.is_ascii_alphanumeric() || "-_./=?&+".contains(c))
+}
+
 /// Git Smart HTTP handler
 ///
 /// Handles all Git HTTP protocol requests by proxying to git-http-backend.
@@ -353,11 +410,23 @@ pub async fn git_handler(
     Path(path): Path<String>,
     request: axum::http::Request<axum::body::Body>,
 ) -> Response {
+    // Validate path to prevent traversal and injection
+    if !is_valid_git_path(&path) {
+        tracing::warn!("Rejected invalid git path: {:?}", path);
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "Invalid path".to_string(),
+            }),
+        )
+            .into_response();
+    }
+
     let method = request.method().clone();
     let headers = request.headers().clone();
     let uri = request.uri().clone();
 
-    // Extract body
+    // Extract body with size limit to prevent DoS
     let body = match request.into_body().collect().await {
         Ok(collected) => collected.to_bytes(),
         Err(e) => {
@@ -370,6 +439,22 @@ pub async fn git_handler(
                 .into_response();
         }
     };
+
+    // Reject oversized bodies to prevent OOM
+    if body.len() > GIT_MAX_BODY_SIZE {
+        return (
+            StatusCode::PAYLOAD_TOO_LARGE,
+            Json(ErrorResponse {
+                error: format!(
+                    "Request body too large ({} bytes, max {} bytes)",
+                    body.len(),
+                    GIT_MAX_BODY_SIZE
+                ),
+            }),
+        )
+            .into_response();
+    }
+
     // Check Basic Auth
     if !check_git_basic_auth(&headers, &state) {
         return (
@@ -380,9 +465,10 @@ pub async fn git_handler(
             .into_response();
     }
 
-    // Get the content repository path
+    // Get the content repository path and optional git backend path
     let repo_path = &state.config.content.repo_path;
-    let backend = GitBackend::new(repo_path);
+    let backend_path = state.config.git.as_ref().and_then(|g| g.backend_path.clone());
+    let backend = GitBackend::with_backend_path(repo_path, backend_path);
 
     // Check if repo exists
     if !backend.is_valid_repo() {
@@ -437,7 +523,7 @@ pub async fn git_handler(
 
             let response = response_builder
                 .body(axum::body::Body::from(cgi_response.body))
-                .unwrap();
+                .expect("valid response from CGI headers");
 
             // If this was a successful push, refresh the cache and fire webhooks
             if is_write_operation && status.is_success() {

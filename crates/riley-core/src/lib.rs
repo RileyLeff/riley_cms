@@ -74,7 +74,7 @@ pub mod git;
 mod storage;
 mod types;
 
-pub use config::{Config, RileyConfig, resolve_config};
+pub use config::{Config, GitConfig, RileyConfig, resolve_config};
 pub use content::ContentCache;
 pub use error::{Error, Result};
 pub use git::{GitBackend, GitCgiResponse};
@@ -133,7 +133,7 @@ impl Riley {
         // Offload blocking filesystem I/O to a dedicated thread pool
         let cache = tokio::task::spawn_blocking(move || ContentCache::load(&content_config))
             .await
-            .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))??;
+            .map_err(|e| Error::Io(std::io::Error::other(e)))??;
 
         Ok(Self {
             config,
@@ -214,7 +214,7 @@ impl Riley {
         // Offload blocking filesystem I/O to a dedicated thread pool
         let new_cache = tokio::task::spawn_blocking(move || ContentCache::load(&content_config))
             .await
-            .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))??;
+            .map_err(|e| Error::Io(std::io::Error::other(e)))??;
 
         let mut cache = self.cache.write().await;
         *cache = new_cache;

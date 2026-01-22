@@ -17,19 +17,25 @@ pub struct AppState {
     pub config: RileyConfig,
 }
 
-/// Build the Axum router with all routes
-pub fn build_router(state: Arc<AppState>) -> Router {
-    let cors = build_cors_layer(&state.config);
-
+/// Build the versioned API routes
+fn api_v1_routes() -> Router<Arc<AppState>> {
     Router::new()
-        // Content routes
         .route("/posts", get(handlers::list_posts))
         .route("/posts/{slug}", get(handlers::get_post))
         .route("/posts/{slug}/raw", get(handlers::get_post_raw))
         .route("/series", get(handlers::list_series))
         .route("/series/{slug}", get(handlers::get_series))
         .route("/assets", get(handlers::list_assets))
-        // Health check
+}
+
+/// Build the Axum router with all routes
+pub fn build_router(state: Arc<AppState>) -> Router {
+    let cors = build_cors_layer(&state.config);
+
+    Router::new()
+        // Versioned API routes
+        .nest("/api/v1", api_v1_routes())
+        // Health check (unversioned)
         .route("/health", get(handlers::health))
         // Git Smart HTTP routes (uses Basic Auth, not Bearer token)
         .route("/git/{*path}", any(handlers::git_handler))

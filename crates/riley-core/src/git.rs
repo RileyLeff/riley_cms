@@ -28,6 +28,8 @@ pub struct GitCgiResponse {
 pub struct GitBackend {
     /// Path to the Git repository
     repo_path: std::path::PathBuf,
+    /// Optional explicit path to git-http-backend binary
+    configured_backend_path: Option<std::path::PathBuf>,
 }
 
 impl GitBackend {
@@ -35,6 +37,18 @@ impl GitBackend {
     pub fn new(repo_path: impl AsRef<Path>) -> Self {
         Self {
             repo_path: repo_path.as_ref().to_path_buf(),
+            configured_backend_path: None,
+        }
+    }
+
+    /// Create a new Git backend with an explicit backend binary path
+    pub fn with_backend_path(
+        repo_path: impl AsRef<Path>,
+        backend_path: Option<std::path::PathBuf>,
+    ) -> Self {
+        Self {
+            repo_path: repo_path.as_ref().to_path_buf(),
+            configured_backend_path: backend_path,
         }
     }
 
@@ -79,8 +93,11 @@ impl GitBackend {
 
         env.insert("CONTENT_LENGTH".to_string(), body.len().to_string());
 
-        // Find git-http-backend
-        let git_backend = find_git_http_backend()?;
+        // Find git-http-backend (use configured path if available)
+        let git_backend = match &self.configured_backend_path {
+            Some(path) => path.to_string_lossy().to_string(),
+            None => find_git_http_backend()?,
+        };
 
         // Spawn the git-http-backend process
         let mut child = Command::new(&git_backend)

@@ -204,7 +204,7 @@ impl ContentCache {
         }
 
         let result = hasher.finalize();
-        format!("\"{}\"", hex::encode(&result[..8]))
+        format!("\"{}\"", hex::encode(result))
     }
 
     /// Get ETag for HTTP caching
