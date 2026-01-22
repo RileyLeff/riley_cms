@@ -1,0 +1,53 @@
+# Understanding Ownership
+
+Ownership is Rust's most unique feature and enables memory safety without a garbage collector.
+
+## The Rules
+
+Rust's ownership system has three rules:
+
+1. Each value has an **owner**
+2. There can only be **one owner** at a time
+3. When the owner goes out of scope, the value is **dropped**
+
+## Example
+
+```rust
+fn main() {
+    let s1 = String::from("hello");
+    let s2 = s1; // s1 is moved to s2
+
+    // println!("{}", s1); // ERROR: s1 is no longer valid
+    println!("{}", s2); // OK
+}
+```
+
+## Borrowing
+
+Instead of transferring ownership, you can **borrow** a value:
+
+```rust
+fn main() {
+    let s1 = String::from("hello");
+    let len = calculate_length(&s1); // borrow s1
+
+    println!("The length of '{}' is {}", s1, len); // s1 is still valid
+}
+
+fn calculate_length(s: &String) -> usize {
+    s.len()
+}
+```
+
+## Why Ownership?
+
+Ownership prevents:
+- Use after free
+- Double free
+- Data races
+
+All at compile time, with zero runtime cost.
+
+## Next Steps
+
+Continue to the next part to learn about lifetimes!

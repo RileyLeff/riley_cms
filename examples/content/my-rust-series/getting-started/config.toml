@@ -1,0 +1,5 @@
+title = "Getting Started with Rust"
+preview_text = "Install Rust and write your first program."
+tags = ["rust", "beginner"]
+goes_live_at = "2025-01-15T00:00:00Z"
+order = 1

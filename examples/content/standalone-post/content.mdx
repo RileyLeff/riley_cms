@@ -1,0 +1,37 @@
+# My First Post
+
+Welcome to your blog powered by **riley_cms**!
+
+## What is riley_cms?
+
+riley_cms is a minimal, self-hosted CMS designed for personal blogs. It follows a simple philosophy:
+
+- **Git is your database** for content
+- **S3/R2 is your database** for assets
+- **The API is stateless glue** that serves it all
+
+## Getting Started
+
+To create a new post, simply:
+
+1. Create a new directory in your `content/` folder
+2. Add a `config.toml` with your post metadata
+3. Add a `content.mdx` with your post content
+4. Push to git (or use `riley_cms push`)
+
+```bash
+mkdir content/my-new-post
+cd content/my-new-post
+```
+
+That's it! Your content is now ready to be served.
+
+## MDX Support
+
+Since this is MDX, you can use React components in your content:
+
+<Callout type="info">
+  This is a callout component rendered by your frontend!
+</Callout>
+
+Happy blogging!

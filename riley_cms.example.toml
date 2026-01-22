@@ -1,0 +1,66 @@
+# riley_cms configuration
+#
+# Config resolution order (first match wins):
+# 1. --config <path> flag
+# 2. RILEY_CMS_CONFIG env var
+# 3. riley_cms.toml in current directory
+# 4. Walk up ancestors looking for riley_cms.toml
+# 5. ~/.config/riley_cms/config.toml (user default)
+# 6. /etc/riley_cms/config.toml (system default)
+
+[content]
+# Path to the git repository containing your content
+repo_path = "/data/repo"
+
+# Directory within the repo where content lives (relative to repo root)
+content_dir = "content"
+
+[storage]
+# Storage backend (currently only "s3" is supported)
+backend = "s3"
+
+# S3/R2 bucket name
+bucket = "my-assets"
+
+# AWS region (use "auto" for Cloudflare R2)
+region = "auto"
+
+# Custom S3 endpoint (required for R2 and other S3-compatible services)
+endpoint = "https://your-account-id.r2.cloudflarestorage.com"
+
+# Base URL for generating public asset URLs
+public_url_base = "https://assets.mydomain.com"
+
+[server]
+# Host to bind to
+host = "0.0.0.0"
+
+# Port to listen on
+port = 8080
+
+# CORS allowed origins
+# Use ["*"] to allow any origin, or specify specific origins
+cors_origins = ["https://mysite.com"]
+
+# Cache-Control max-age in seconds
+cache_max_age = 60
+
+# Cache-Control stale-while-revalidate in seconds
+cache_stale_while_revalidate = 300
+
+[webhooks]
+# URLs to POST to after successful git push (content update)
+# Use case: trigger frontend rebuild/revalidation
+on_content_update = [
+    "https://mysite.com/api/revalidate?secret=your-secret-here"
+]
+
+[auth]
+# Authentication tokens
+# Values can be literals or "env:VAR_NAME" to read from environment variables
+
+# Token for git push authentication
+git_token = "env:GIT_AUTH_TOKEN"
+
+# Token for accessing drafts/scheduled posts via API
+api_token = "env:API_TOKEN"

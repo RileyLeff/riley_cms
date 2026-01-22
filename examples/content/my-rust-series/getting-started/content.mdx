@@ -1,0 +1,47 @@
+# Getting Started with Rust
+
+In this first part of the series, we'll install Rust and write our first program.
+
+## Installation
+
+The easiest way to install Rust is using rustup:
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+Verify your installation:
+
+```bash
+rustc --version
+cargo --version
+```
+
+## Hello, World!
+
+Create a new project:
+
+```bash
+cargo new hello-world
+cd hello-world
+```
+
+Open `src/main.rs`:
+
+```rust
+fn main() {
+    println!("Hello, world!");
+}
+```
+
+Run it:
+
+```bash
+cargo run
+```
+
+Congratulations! You've written your first Rust program.
+
+## Next Steps
+
+In the next part of this series, we'll explore Rust's ownership system.

@@ -1,0 +1,6 @@
+title = "My First Post"
+subtitle = "Getting started with riley_cms"
+preview_text = "Learn how to set up and use riley_cms for your personal blog."
+preview_image = "https://assets.example.com/img/first-post.jpg"
+tags = ["tutorial", "getting-started"]
+goes_live_at = "2025-01-15T00:00:00Z"
