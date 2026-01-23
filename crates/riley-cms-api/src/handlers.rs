@@ -321,18 +321,36 @@ pub struct AssetListQuery {
     pub continuation_token: Option<String>,
 }
 
-/// GET /assets - List assets in storage with pagination
+/// GET /assets - List assets in storage with pagination (admin only)
 pub async fn list_assets(
     State(state): State<Arc<AppState>>,
+    Extension(auth_status): Extension<AuthStatus>,
     Query(query): Query<AssetListQuery>,
 ) -> Response {
+    if auth_status != AuthStatus::Admin {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(ErrorResponse {
+                error: "Authentication required to list assets".to_string(),
+            }),
+        )
+            .into_response();
+    }
+
     let opts = riley_cms_core::AssetListOptions {
         limit: query.limit,
         continuation_token: query.continuation_token,
     };
 
     match state.riley_cms.list_assets(&opts).await {
-        Ok(result) => Json(result).into_response(),
+        Ok(result) => {
+            let mut response = Json(result).into_response();
+            response.headers_mut().insert(
+                header::CACHE_CONTROL,
+                "private, no-store".parse().expect("valid static header"),
+            );
+            response
+        }
         Err(e) => internal_error(e),
     }
 }

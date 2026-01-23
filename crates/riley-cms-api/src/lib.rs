@@ -87,6 +87,14 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             header::X_CONTENT_TYPE_OPTIONS,
             HeaderValue::from_static("nosniff"),
         ))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::X_FRAME_OPTIONS,
+            HeaderValue::from_static("DENY"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::CONTENT_SECURITY_POLICY,
+            HeaderValue::from_static("default-src 'none'"),
+        ))
         .layer(
             TraceLayer::new_for_http().make_span_with(
                 tower_http::trace::DefaultMakeSpan::new()

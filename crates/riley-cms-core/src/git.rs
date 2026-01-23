@@ -18,7 +18,7 @@ use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::task::JoinHandle;
-use tokio::time::{Duration, timeout};
+use tokio::time::{Duration, Instant, timeout};
 
 /// Default maximum time to wait for a git-http-backend process to complete.
 pub const DEFAULT_GIT_CGI_TIMEOUT: Duration = Duration::from_secs(300); // 5 minutes
@@ -68,20 +68,35 @@ impl GitCgiCompletion {
     /// Wait for the process to exit. Returns the exit status.
     ///
     /// Also joins the stdin streaming task and logs stderr output.
-    /// The `cgi_timeout` parameter controls how long to wait before killing the process.
+    /// The `cgi_timeout` parameter bounds the total time for both stdin streaming
+    /// AND child process exit, preventing slow-sending clients from keeping the
+    /// task alive indefinitely.
     pub async fn wait(mut self, cgi_timeout: Duration) -> Result<std::process::ExitStatus> {
-        // Wait for stdin to finish (if still running)
+        let start = Instant::now();
+
+        // Phase 1: Wait for stdin to finish (bounded by cgi_timeout).
+        // A slow-sending client could stall here indefinitely without this timeout.
         if let Some(stdin_task) = self.stdin_task.take() {
-            match stdin_task.await {
-                Ok(Err(e)) => {
+            match timeout(cgi_timeout, stdin_task).await {
+                Ok(Ok(Err(e))) => {
                     tracing::warn!("stdin streaming error (non-fatal): {}", e);
                 }
-                Err(e) => tracing::warn!("stdin task panicked: {}", e),
-                Ok(Ok(())) => {}
+                Ok(Err(e)) => tracing::warn!("stdin task panicked: {}", e),
+                Ok(Ok(Ok(()))) => {}
+                Err(_elapsed) => {
+                    tracing::error!(
+                        "Git CGI timed out waiting for request body after {}s, killing",
+                        cgi_timeout.as_secs()
+                    );
+                    let _ = self.child.kill().await;
+                    return Err(Error::Git("Git operation timed out".to_string()));
+                }
             }
         }
 
-        let status = match timeout(cgi_timeout, self.child.wait()).await {
+        // Phase 2: Wait for child process to exit with remaining timeout budget.
+        let remaining = cgi_timeout.saturating_sub(start.elapsed());
+        let status = match timeout(remaining, self.child.wait()).await {
             Ok(result) => result
                 .map_err(|e| Error::Git(format!("Failed to wait on git-http-backend: {}", e)))?,
             Err(_elapsed) => {
@@ -323,28 +338,28 @@ impl GitBackend {
 ///
 /// Reads line by line until an empty line (the header/body separator) is found.
 /// The reader is left positioned at the start of the body.
-/// Fails if headers exceed `MAX_CGI_HEADER_SIZE` bytes.
+/// Fails if total headers exceed `MAX_CGI_HEADER_SIZE` bytes.
+///
+/// Uses a bounded line reader (`fill_buf`/`consume`) to prevent any single
+/// line from causing unbounded memory allocation.
 async fn read_cgi_headers<R: tokio::io::AsyncBufRead + Unpin>(
     reader: &mut R,
 ) -> Result<GitCgiHeaders> {
     let mut headers = HashMap::new();
     let mut status: u16 = 200;
     let mut total_header_bytes: usize = 0;
-    let mut line_buf = String::new();
+    let mut line_buf = Vec::new();
 
     loop {
         line_buf.clear();
-        let bytes_read = reader
-            .read_line(&mut line_buf)
-            .await
-            .map_err(|e| Error::Git(format!("Failed to read CGI headers: {}", e)))?;
+        let found_newline = read_bounded_line(reader, &mut line_buf, MAX_CGI_HEADER_SIZE).await?;
 
-        if bytes_read == 0 {
+        if line_buf.is_empty() && !found_newline {
             // EOF before finding separator — treat as headers-only response
             break;
         }
 
-        total_header_bytes += bytes_read;
+        total_header_bytes += line_buf.len() + if found_newline { 1 } else { 0 };
         if total_header_bytes > MAX_CGI_HEADER_SIZE {
             return Err(Error::Git(format!(
                 "CGI headers too large (>{} bytes). Possible malformed response.",
@@ -353,13 +368,15 @@ async fn read_cgi_headers<R: tokio::io::AsyncBufRead + Unpin>(
         }
 
         // Check for the empty line separator (after trimming \r\n or \n)
-        let trimmed = line_buf.trim_end_matches(['\r', '\n']);
+        let trimmed = strip_line_ending(&line_buf);
         if trimmed.is_empty() {
             break; // Found the header/body separator
         }
 
         // Parse "Key: Value" header line
-        if let Some((key, value)) = trimmed.split_once(':') {
+        let line_str = std::str::from_utf8(trimmed)
+            .map_err(|_| Error::Git("CGI header contains invalid UTF-8".to_string()))?;
+        if let Some((key, value)) = line_str.split_once(':') {
             let key = key.trim().to_lowercase();
             let value = value.trim().to_string();
 
@@ -375,6 +392,68 @@ async fn read_cgi_headers<R: tokio::io::AsyncBufRead + Unpin>(
     }
 
     Ok(GitCgiHeaders { status, headers })
+}
+
+/// Read a single line from a buffered reader with a maximum byte limit.
+///
+/// Reads from the reader's internal buffer via `fill_buf`/`consume` to avoid
+/// unbounded memory allocation. Returns `true` if a newline was found, `false`
+/// on EOF. The newline byte itself is NOT included in `buf`.
+async fn read_bounded_line<R: tokio::io::AsyncBufRead + Unpin>(
+    reader: &mut R,
+    buf: &mut Vec<u8>,
+    max_len: usize,
+) -> Result<bool> {
+    loop {
+        let available = reader
+            .fill_buf()
+            .await
+            .map_err(|e| Error::Git(format!("Failed to read CGI headers: {}", e)))?;
+
+        if available.is_empty() {
+            return Ok(false); // EOF
+        }
+
+        // Look for newline in the available data
+        match available.iter().position(|&b| b == b'\n') {
+            Some(pos) => {
+                // Found newline — append everything before it, consume up to and including newline
+                buf.extend_from_slice(&available[..pos]);
+                reader.consume(pos + 1);
+                if buf.len() > max_len {
+                    return Err(Error::Git(format!(
+                        "CGI header line too large (>{} bytes).",
+                        max_len
+                    )));
+                }
+                return Ok(true);
+            }
+            None => {
+                // No newline yet — append all available data and continue
+                buf.extend_from_slice(available);
+                let consumed = available.len();
+                reader.consume(consumed);
+                if buf.len() > max_len {
+                    return Err(Error::Git(format!(
+                        "CGI header line too large (>{} bytes).",
+                        max_len
+                    )));
+                }
+            }
+        }
+    }
+}
+
+/// Strip trailing \r\n or \n from a byte slice.
+fn strip_line_ending(line: &[u8]) -> &[u8] {
+    let mut end = line.len();
+    if end > 0 && line[end - 1] == b'\n' {
+        end -= 1;
+    }
+    if end > 0 && line[end - 1] == b'\r' {
+        end -= 1;
+    }
+    &line[..end]
 }
 
 /// Find the git-http-backend binary
