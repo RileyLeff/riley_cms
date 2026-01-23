@@ -41,32 +41,30 @@ pub async fn auth_middleware(
     let mut auth_status = AuthStatus::Public;
 
     // Check for configured API token
-    if let Some(ref auth_config) = state.config.auth {
-        if let Some(ref token_config) = auth_config.api_token {
-            // Resolve the token (supports "env:VAR_NAME" syntax)
-            match token_config.resolve() {
-                Ok(expected_token) => {
-                    // Check Authorization header for Bearer token
-                    if let Some(auth_header) = request.headers().get(header::AUTHORIZATION) {
-                        if let Ok(auth_str) = auth_header.to_str() {
-                            if let Some(provided_token) = auth_str.strip_prefix("Bearer ") {
-                                // Hash both tokens before comparing to prevent
-                                // leaking token length via timing side-channel.
-                                // SHA-256 produces fixed 32-byte hashes regardless
-                                // of input length.
-                                let provided_hash =
-                                    Sha256::digest(provided_token.trim().as_bytes());
-                                let expected_hash = Sha256::digest(expected_token.as_bytes());
-                                if provided_hash.ct_eq(&expected_hash).into() {
-                                    auth_status = AuthStatus::Admin;
-                                }
-                            }
-                        }
+    if let Some(ref auth_config) = state.config.auth
+        && let Some(ref token_config) = auth_config.api_token
+    {
+        // Resolve the token (supports "env:VAR_NAME" syntax)
+        match token_config.resolve() {
+            Ok(expected_token) => {
+                // Check Authorization header for Bearer token
+                if let Some(auth_header) = request.headers().get(header::AUTHORIZATION)
+                    && let Ok(auth_str) = auth_header.to_str()
+                    && let Some(provided_token) = auth_str.strip_prefix("Bearer ")
+                {
+                    // Hash both tokens before comparing to prevent
+                    // leaking token length via timing side-channel.
+                    // SHA-256 produces fixed 32-byte hashes regardless
+                    // of input length.
+                    let provided_hash = Sha256::digest(provided_token.trim().as_bytes());
+                    let expected_hash = Sha256::digest(expected_token.as_bytes());
+                    if provided_hash.ct_eq(&expected_hash).into() {
+                        auth_status = AuthStatus::Admin;
                     }
                 }
-                Err(e) => {
-                    tracing::warn!("Failed to resolve API token: {}. Admin auth disabled.", e);
-                }
+            }
+            Err(e) => {
+                tracing::warn!("Failed to resolve API token: {}. Admin auth disabled.", e);
             }
         }
     }

@@ -112,10 +112,10 @@ impl GitBackend {
             .map_err(|e| Error::Git(format!("Failed to spawn git-http-backend: {}", e)))?;
 
         // Write request body to stdin
-        if !body.is_empty() {
-            if let Some(mut stdin) = child.stdin.take() {
-                stdin.write_all(body).await?;
-            }
+        if !body.is_empty()
+            && let Some(mut stdin) = child.stdin.take()
+        {
+            stdin.write_all(body).await?;
         }
 
         // Read output
@@ -216,12 +216,11 @@ fn parse_cgi_response(data: &[u8]) -> Result<GitCgiResponse> {
                 let value = value.trim().to_string();
 
                 // Parse Status header for HTTP status code
-                if key == "status" {
-                    if let Some(code_str) = value.split_whitespace().next() {
-                        if let Ok(code) = code_str.parse::<u16>() {
-                            status = code;
-                        }
-                    }
+                if key == "status"
+                    && let Some(code_str) = value.split_whitespace().next()
+                    && let Ok(code) = code_str.parse::<u16>()
+                {
+                    status = code;
                 } else {
                     headers.insert(key, value);
                 }

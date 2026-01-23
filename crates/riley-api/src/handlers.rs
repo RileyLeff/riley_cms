@@ -545,10 +545,10 @@ pub async fn git_handler(
 
             // Copy headers from CGI response
             for (key, value) in &cgi_response.headers {
-                if let Ok(header_name) = key.parse::<axum::http::header::HeaderName>() {
-                    if let Ok(header_value) = value.parse::<axum::http::header::HeaderValue>() {
-                        response_builder = response_builder.header(header_name, header_value);
-                    }
+                if let Ok(header_name) = key.parse::<axum::http::header::HeaderName>()
+                    && let Ok(header_value) = value.parse::<axum::http::header::HeaderValue>()
+                {
+                    response_builder = response_builder.header(header_name, header_value);
                 }
             }
 
