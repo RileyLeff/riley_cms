@@ -589,6 +589,31 @@ pub async fn git_handler(
                 match cgi_response.completion.wait(cgi_timeout).await {
                     Ok(exit_status) => {
                         if is_write_operation && exit_status.success() {
+                            // Update working tree to match pushed content.
+                            // git-http-backend updates the git database but not the
+                            // working tree, so we must checkout explicitly before
+                            // refreshing the content cache.
+                            let repo_path = &state_clone.config.content.repo_path;
+                            match tokio::process::Command::new("git")
+                                .args(["-C", &repo_path.to_string_lossy(), "checkout", "-f", "HEAD"])
+                                .output()
+                                .await
+                            {
+                                Ok(output) if !output.status.success() => {
+                                    tracing::error!(
+                                        "git checkout failed after push: {}",
+                                        String::from_utf8_lossy(&output.stderr)
+                                    );
+                                }
+                                Err(e) => {
+                                    tracing::error!(
+                                        "Failed to run git checkout after push: {}",
+                                        e
+                                    );
+                                }
+                                _ => {}
+                            }
+
                             if let Err(e) = state_clone.riley_cms.refresh().await {
                                 tracing::error!("Failed to refresh content after git push: {}", e);
                             }

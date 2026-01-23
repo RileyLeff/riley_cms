@@ -82,6 +82,7 @@ pub use git::{BodyStream, GitBackend, GitCgiCompletion, GitCgiHeaders, GitCgiStr
 pub use storage::Storage;
 pub use types::*;
 
+use chrono::Utc;
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
 use std::net::ToSocketAddrs;
@@ -354,7 +355,13 @@ async fn send_webhook(url: &str, secret: Option<&str>) {
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
 
-    let body = "{}";
+    // Include a timestamp in the payload to prevent replay attacks.
+    // Each webhook delivery gets a unique signature since the body changes.
+    let body = serde_json::json!({
+        "event": "content_update",
+        "timestamp": Utc::now().timestamp()
+    })
+    .to_string();
 
     // Compute HMAC signature if secret is configured
     let signature = match secret {
@@ -376,7 +383,7 @@ async fn send_webhook(url: &str, secret: Option<&str>) {
         let mut request = client
             .post(url)
             .header("Content-Type", "application/json")
-            .body(body);
+            .body(body.clone());
 
         if let Some(ref sig) = signature {
             request = request.header("X-Riley-Cms-Signature", format!("sha256={}", sig));

@@ -5,6 +5,7 @@ pub mod middleware;
 
 use axum::{
     Router,
+    extract::DefaultBodyLimit,
     http::{HeaderValue, Method, header},
     middleware::from_fn_with_state,
     routing::{any, get},
@@ -82,6 +83,9 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .layer(from_fn_with_state(state.clone(), auth_middleware))
         // State and other middleware
         .with_state(state)
+        // Disable Axum's default 2MB body limit. The git handler enforces its own
+        // streaming limit (default 100MB), and all other routes are GET-only.
+        .layer(DefaultBodyLimit::disable())
         .layer(cors)
         .layer(SetResponseHeaderLayer::overriding(
             header::X_CONTENT_TYPE_OPTIONS,
