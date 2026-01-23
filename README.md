@@ -1,7 +1,7 @@
 # riley_cms
 
-[![Crates.io](https://img.shields.io/crates/v/riley-core.svg)](https://crates.io/crates/riley-core)
-[![Documentation](https://docs.rs/riley-core/badge.svg)](https://docs.rs/riley-core)
+[![Crates.io](https://img.shields.io/crates/v/riley-cms-core.svg)](https://crates.io/crates/riley-cms-core)
+[![Documentation](https://docs.rs/riley-cms-core/badge.svg)](https://docs.rs/riley-cms-core)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 A minimal, self-hosted headless CMS for personal blogs. Rust, no database, no GUI.
@@ -21,7 +21,7 @@ A minimal, self-hosted headless CMS for personal blogs. Rust, no database, no GU
 ### Install
 
 ```bash
-cargo install riley-cli
+cargo install riley-cms-cli
 ```
 
 Or build from source:
@@ -249,21 +249,21 @@ riley_cms validate           # Check content for errors
 
 | Crate | Description |
 |-------|-------------|
-| [`riley-core`](https://crates.io/crates/riley-core) | Core library - embed in your own apps |
-| [`riley-api`](https://crates.io/crates/riley-api) | Axum HTTP server |
-| [`riley-cli`](https://crates.io/crates/riley-cli) | CLI binary |
+| [`riley-cms-core`](https://crates.io/crates/riley-cms-core) | Core library - embed in your own apps |
+| [`riley-cms-api`](https://crates.io/crates/riley-cms-api) | Axum HTTP server |
+| [`riley-cms-cli`](https://crates.io/crates/riley-cms-cli) | CLI binary |
 
-### Using riley-core as a Library
+### Using riley-cms-core as a Library
 
 ```rust
-use riley_core::{Riley, resolve_config, ListOptions};
+use riley_cms_core::{RileyCms, resolve_config, ListOptions};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let config = resolve_config(None)?;
-    let riley = Riley::from_config(config).await?;
+    let riley_cms = RileyCms::from_config(config).await?;
 
-    let posts = riley.list_posts(&ListOptions::default()).await?;
+    let posts = riley_cms.list_posts(&ListOptions::default()).await?;
     for post in posts.items {
         println!("{}: {}", post.slug, post.title);
     }
@@ -293,7 +293,7 @@ CMD ["riley_cms", "serve"]
 
 ```yaml
 services:
-  riley:
+  riley_cms:
     build: .
     volumes:
       - ./content:/data/content:ro

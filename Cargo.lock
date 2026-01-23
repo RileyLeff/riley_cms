@@ -2166,7 +2166,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "riley-api"
+name = "riley-cms-api"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -2175,7 +2175,7 @@ dependencies = [
  "chrono",
  "futures-util",
  "http-body-util",
- "riley-core",
+ "riley-cms-core",
  "serde",
  "serde_json",
  "sha2",
@@ -2192,14 +2192,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "riley-cli"
+name = "riley-cms-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
  "clap",
- "riley-api",
- "riley-core",
+ "riley-cms-api",
+ "riley-cms-core",
  "serde",
  "serde_json",
  "tokio",
@@ -2208,7 +2208,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "riley-core"
+name = "riley-cms-core"
 version = "0.1.0"
 dependencies = [
  "aws-config",

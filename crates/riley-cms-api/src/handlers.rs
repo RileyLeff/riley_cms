@@ -1,4 +1,4 @@
-//! HTTP request handlers for riley-api
+//! HTTP request handlers for riley-cms-api
 
 use crate::AppState;
 use crate::middleware::AuthStatus;
@@ -9,7 +9,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use futures_util::StreamExt;
-use riley_core::ListOptions;
+use riley_cms_core::ListOptions;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -143,13 +143,13 @@ pub async fn list_posts(
 
     let opts: ListOptions = query.into();
 
-    match state.riley.list_posts(&opts).await {
+    match state.riley_cms.list_posts(&opts).await {
         Ok(result) => {
-            let etag = state.riley.content_etag().await;
+            let etag = state.riley_cms.content_etag().await;
 
             #[derive(Serialize)]
             struct PostsResponse {
-                posts: Vec<riley_core::PostSummary>,
+                posts: Vec<riley_cms_core::PostSummary>,
                 total: usize,
                 limit: usize,
                 offset: usize,
@@ -174,13 +174,13 @@ pub async fn get_post(
     Extension(auth_status): Extension<AuthStatus>,
     Path(slug): Path<String>,
 ) -> Response {
-    match state.riley.get_post(&slug).await {
+    match state.riley_cms.get_post(&slug).await {
         Ok(Some(post)) => {
             // Visibility check: drafts/scheduled posts require admin auth
             if !is_content_visible(post.goes_live_at, auth_status) {
                 return not_found_response(&slug, "Post");
             }
-            let etag = state.riley.content_etag().await;
+            let etag = state.riley_cms.content_etag().await;
             with_cache_headers(Json(post), &state, &etag, auth_status == AuthStatus::Admin)
         }
         Ok(None) => not_found_response(&slug, "Post"),
@@ -194,14 +194,14 @@ pub async fn get_post_raw(
     Extension(auth_status): Extension<AuthStatus>,
     Path(slug): Path<String>,
 ) -> Response {
-    match state.riley.get_post(&slug).await {
+    match state.riley_cms.get_post(&slug).await {
         Ok(Some(post)) => {
             // Visibility check: drafts/scheduled posts require admin auth
             if !is_content_visible(post.goes_live_at, auth_status) {
                 return not_found_response(&slug, "Post");
             }
             let is_admin = auth_status == AuthStatus::Admin;
-            let etag = state.riley.content_etag().await;
+            let etag = state.riley_cms.content_etag().await;
             let mut response = post.content.into_response();
             let headers = response.headers_mut();
 
@@ -264,13 +264,13 @@ pub async fn list_series(
 
     let opts: ListOptions = query.into();
 
-    match state.riley.list_series(&opts).await {
+    match state.riley_cms.list_series(&opts).await {
         Ok(result) => {
-            let etag = state.riley.content_etag().await;
+            let etag = state.riley_cms.content_etag().await;
 
             #[derive(Serialize)]
             struct SeriesResponse {
-                series: Vec<riley_core::SeriesSummary>,
+                series: Vec<riley_cms_core::SeriesSummary>,
                 total: usize,
                 limit: usize,
                 offset: usize,
@@ -295,13 +295,13 @@ pub async fn get_series(
     Extension(auth_status): Extension<AuthStatus>,
     Path(slug): Path<String>,
 ) -> Response {
-    match state.riley.get_series(&slug).await {
+    match state.riley_cms.get_series(&slug).await {
         Ok(Some(series)) => {
             // Visibility check: drafts/scheduled series require admin auth
             if !is_content_visible(series.goes_live_at, auth_status) {
                 return not_found_response(&slug, "Series");
             }
-            let etag = state.riley.content_etag().await;
+            let etag = state.riley_cms.content_etag().await;
             with_cache_headers(
                 Json(series),
                 &state,
@@ -326,12 +326,12 @@ pub async fn list_assets(
     State(state): State<Arc<AppState>>,
     Query(query): Query<AssetListQuery>,
 ) -> Response {
-    let opts = riley_core::AssetListOptions {
+    let opts = riley_cms_core::AssetListOptions {
         limit: query.limit,
         continuation_token: query.continuation_token,
     };
 
-    match state.riley.list_assets(&opts).await {
+    match state.riley_cms.list_assets(&opts).await {
         Ok(result) => Json(result).into_response(),
         Err(e) => internal_error(e),
     }
@@ -351,7 +351,7 @@ pub async fn health() -> Response {
 
 use axum::http::HeaderMap;
 use base64::Engine;
-use riley_core::GitBackend;
+use riley_cms_core::GitBackend;
 use subtle::ConstantTimeEq;
 
 /// Check Basic Auth for Git operations
@@ -561,13 +561,13 @@ pub async fn git_handler(
                     match cgi_response.completion.wait().await {
                         Ok(exit_status) => {
                             if exit_status.success() {
-                                if let Err(e) = state_clone.riley.refresh().await {
+                                if let Err(e) = state_clone.riley_cms.refresh().await {
                                     tracing::error!(
                                         "Failed to refresh content after git push: {}",
                                         e
                                     );
                                 }
-                                state_clone.riley.fire_webhooks().await;
+                                state_clone.riley_cms.fire_webhooks().await;
                             }
                         }
                         Err(e) => {

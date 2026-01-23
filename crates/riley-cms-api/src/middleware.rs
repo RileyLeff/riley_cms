@@ -1,4 +1,4 @@
-//! Middleware for riley-api
+//! Middleware for riley-cms-api
 //!
 //! Authentication middleware for protected endpoints.
 

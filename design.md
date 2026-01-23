@@ -31,10 +31,10 @@ Workspace structure:
 riley_cms/
 ├── Cargo.toml              # workspace
 ├── crates/
-│   ├── riley-core/         # git ops, s3 ops, content parsing, shared types
+│   ├── riley-cms-core/     # git ops, s3 ops, content parsing, shared types
 │   │                       # publishable as a lib for embedding
-│   ├── riley-api/          # axum server
-│   └── riley-cli/          # clap CLI
+│   ├── riley-cms-api/      # axum server
+│   └── riley-cms-cli/      # clap CLI
 ├── examples/
 │   └── content/            # example content repo structure
 ├── README.md
@@ -137,7 +137,7 @@ struct SeriesConfig {
     goes_live_at: Option<DateTime<Utc>>,  // None = draft, Some(past) = live, Some(future) = scheduled
 }
 
-// === Domain types (constructed by riley-core) ===
+// === Domain types (constructed by riley-cms-core) ===
 
 struct Post {
     slug: String,
@@ -247,8 +247,8 @@ HTTP caching:
 
 The service hosts the git repo itself via git-over-HTTP (smart protocol). No GitHub dependency.
 
-- Push: `git push https://riley.mydomain.com/git/content main`
-- Clone: `git clone https://riley.mydomain.com/git/content` (if you want, can disable public clone)
+- Push: `git push https://cms.mydomain.com/git/content main`
+- Clone: `git clone https://cms.mydomain.com/git/content` (if you want, can disable public clone)
 - Auth via bearer token or basic auth (username ignored, password = token)
 - Implementation: use `git2` or `gix` crate (prefer library over shelling out to `git http-backend`)
 - Repo lives on a persistent volume at the configured `repo_path`
@@ -295,10 +295,10 @@ CMD ["riley_cms", "serve", "--config", "/etc/riley_cms/config.toml"]
 ```yaml
 # docker-compose.yml
 services:
-  riley:
+  riley_cms:
     build: .
     volumes:
-      - riley_data:/data
+      - riley_cms_data:/data
       - ./riley_cms.toml:/etc/riley_cms/config.toml:ro
     environment:
       - GIT_AUTH_TOKEN=${GIT_AUTH_TOKEN}
@@ -310,18 +310,18 @@ services:
     restart: unless-stopped
 
 volumes:
-  riley_data:
+  riley_cms_data:
 ```
 
 ## Crates
 
-### riley-core (lib)
+### riley-cms-core (lib)
 
 Publishable, embeddable. No HTTP, no CLI — just the domain logic.
 
 ```rust
-pub struct Riley {
-    config: RileyConfig,
+pub struct RileyCms {
+    config: RileyCmsConfig,
 }
 
 pub struct ListOptions {
@@ -336,8 +336,8 @@ pub struct ListResult<T> {
     pub total: usize,
 }
 
-impl Riley {
-    pub fn from_config(config: RileyConfig) -> Result<Self>;
+impl RileyCms {
+    pub fn from_config(config: RileyCmsConfig) -> Result<Self>;
 
     // Content (cached in memory, refreshed on git push)
     pub fn list_posts(&self, opts: &ListOptions) -> Result<ListResult<PostSummary>>;
@@ -360,13 +360,13 @@ impl Riley {
 }
 ```
 
-### riley-api
+### riley-cms-api
 
-Axum server. Thin layer over `riley-core`.
+Axum server. Thin layer over `riley-cms-core`.
 
-### riley-cli
+### riley-cms-cli
 
-Clap CLI. Thin layer over `riley-core`.
+Clap CLI. Thin layer over `riley-cms-core`.
 
 ## Crate Dependencies
 
@@ -378,7 +378,7 @@ Clap CLI. Thin layer over `riley-core`.
 - `tokio` — async runtime
 - `tracing`, `tracing-subscriber` — logging
 - `thiserror` — error types
-- `git2` or `gix` — git operations (prefer library over shelling out)
+- `git-http-backend` — git operations via CGI
 - `tower-http` — middleware (CORS, tracing, etc)
 
 Maybe:
@@ -393,7 +393,7 @@ Since this is meant to be published:
 3. **docs/content-structure.md** — detailed explanation of the content format
 4. **docs/api.md** — API reference
 5. **docs/deployment.md** — Docker, docker-compose, Hetzner, Fly.io examples
-6. **docs/embedding.md** — using `riley-core` as a library
+6. **docs/embedding.md** — using `riley-cms-core` as a library
 7. **examples/content/** — example content repo people can copy
 8. **riley_cms.example.toml** — annotated example config
 

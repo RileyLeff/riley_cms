@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/riley-core", "crates/riley-api", "crates/riley-cli"]
+members = ["crates/riley-cms-core", "crates/riley-cms-api", "crates/riley-cms-cli"]
 
 [workspace.package]
 version = "0.1.0"
@@ -62,6 +62,6 @@ mime_guess = "2.0"
 subtle = "2.6"
 
 # Workspace crates
-riley-core = { path = "crates/riley-core" }
-riley-api = { path = "crates/riley-api" }
-riley-cli = { path = "crates/riley-cli" }
+riley-cms-core = { path = "crates/riley-cms-core" }
+riley-cms-api = { path = "crates/riley-cms-api" }
+riley-cms-cli = { path = "crates/riley-cms-cli" }

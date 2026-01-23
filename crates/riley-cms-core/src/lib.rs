@@ -1,4 +1,4 @@
-//! # riley-core
+//! # riley-cms-core
 //!
 //! Core library for riley_cms - a minimal, self-hosted headless CMS.
 //!
@@ -15,24 +15,24 @@
 //! ## Quick Start
 //!
 //! ```ignore
-//! use riley_core::{Riley, resolve_config, ListOptions};
+//! use riley_cms_core::{RileyCms, resolve_config, ListOptions};
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     // Load config from standard locations
 //!     let config = resolve_config(None)?;
 //!
-//!     // Create the Riley instance
-//!     let riley = Riley::from_config(config).await?;
+//!     // Create the RileyCms instance
+//!     let riley_cms = RileyCms::from_config(config).await?;
 //!
 //!     // List all live posts
-//!     let posts = riley.list_posts(&ListOptions::default()).await?;
+//!     let posts = riley_cms.list_posts(&ListOptions::default()).await?;
 //!     for post in posts.items {
 //!         println!("{}: {}", post.slug, post.title);
 //!     }
 //!
 //!     // Get a specific post
-//!     if let Some(post) = riley.get_post("my-post").await? {
+//!     if let Some(post) = riley_cms.get_post("my-post").await? {
 //!         println!("Content: {}", post.content);
 //!     }
 //!
@@ -74,7 +74,7 @@ pub mod git;
 mod storage;
 mod types;
 
-pub use config::{Config, GitConfig, RileyConfig, resolve_config};
+pub use config::{Config, GitConfig, RileyCmsConfig, resolve_config};
 pub use content::ContentCache;
 pub use error::{Error, Result};
 pub use git::{BodyStream, GitBackend, GitCgiCompletion, GitCgiHeaders, GitCgiStreamResponse};
@@ -90,16 +90,16 @@ use tokio::sync::RwLock;
 
 /// Main entry point for riley_cms functionality.
 ///
-/// `Riley` provides access to all CMS operations: listing posts and series,
+/// `RileyCms` provides access to all CMS operations: listing posts and series,
 /// retrieving individual content, managing assets, and cache control.
 ///
 /// # Example
 ///
 /// ```ignore
-/// use riley_core::{Riley, RileyConfig, ListOptions};
+/// use riley_cms_core::{RileyCms, RileyCmsConfig, ListOptions};
 ///
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let config: RileyConfig = toml::from_str(r#"
+/// let config: RileyCmsConfig = toml::from_str(r#"
 /// [content]
 /// repo_path = "/data/content"
 /// [storage]
@@ -107,19 +107,19 @@ use tokio::sync::RwLock;
 /// public_url_base = "https://assets.example.com"
 /// "#)?;
 ///
-/// let riley = Riley::from_config(config).await?;
-/// let posts = riley.list_posts(&ListOptions::default()).await?;
+/// let riley_cms = RileyCms::from_config(config).await?;
+/// let posts = riley_cms.list_posts(&ListOptions::default()).await?;
 /// # Ok(())
 /// # }
 /// ```
-pub struct Riley {
-    config: RileyConfig,
+pub struct RileyCms {
+    config: RileyCmsConfig,
     cache: Arc<RwLock<ContentCache>>,
     storage: Storage,
 }
 
-impl Riley {
-    /// Create a new Riley instance from configuration.
+impl RileyCms {
+    /// Create a new RileyCms instance from configuration.
     ///
     /// This loads content from disk into an in-memory cache and initializes
     /// the S3 storage client.
@@ -127,7 +127,7 @@ impl Riley {
     /// # Errors
     ///
     /// Returns an error if content cannot be loaded or S3 configuration is invalid.
-    pub async fn from_config(config: RileyConfig) -> Result<Self> {
+    pub async fn from_config(config: RileyCmsConfig) -> Result<Self> {
         let storage = Storage::new(&config.storage).await?;
 
         // Clone content config to move into the blocking task closure
@@ -243,7 +243,7 @@ impl Riley {
     /// to the validated IP (preventing DNS rebinding/TOCTOU attacks).
     ///
     /// If a `secret` is configured in `[webhooks]`, signs each request body with
-    /// HMAC-SHA256 and includes the hex signature in the `X-Riley-Signature` header.
+    /// HMAC-SHA256 and includes the hex signature in the `X-Riley-Cms-Signature` header.
     /// Retries up to 3 times with exponential backoff on network errors or 5xx responses.
     pub async fn fire_webhooks(&self) {
         if let Some(ref webhooks) = self.config.webhooks {
@@ -267,7 +267,7 @@ impl Riley {
     }
 
     /// Get a reference to the config.
-    pub fn config(&self) -> &RileyConfig {
+    pub fn config(&self) -> &RileyCmsConfig {
         &self.config
     }
 }
@@ -399,7 +399,7 @@ async fn send_webhook(url: &str, secret: Option<&str>) {
             .body(body);
 
         if let Some(ref sig) = signature {
-            request = request.header("X-Riley-Signature", format!("sha256={}", sig));
+            request = request.header("X-Riley-Cms-Signature", format!("sha256={}", sig));
         }
 
         match request.send().await {

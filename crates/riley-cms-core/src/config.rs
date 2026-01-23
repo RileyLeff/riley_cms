@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 /// Full configuration for riley_cms
 #[derive(Debug, Clone, Deserialize)]
-pub struct RileyConfig {
+pub struct RileyCmsConfig {
     pub content: ContentConfig,
     pub storage: StorageConfig,
     pub server: Option<ServerConfig>,
@@ -103,7 +103,7 @@ pub struct WebhooksConfig {
     #[serde(default)]
     pub on_content_update: Vec<String>,
     /// HMAC-SHA256 secret for signing webhook payloads.
-    /// When set, each webhook request includes an `X-Riley-Signature` header
+    /// When set, each webhook request includes an `X-Riley-Cms-Signature` header
     /// with the hex-encoded HMAC-SHA256 of the request body.
     /// Supports `"env:VAR_NAME"` syntax.
     pub secret: Option<ConfigValue>,
@@ -145,7 +145,7 @@ pub struct Config;
 
 impl Config {
     /// Load config from a specific path
-    pub fn from_path(path: &Path) -> Result<RileyConfig> {
+    pub fn from_path(path: &Path) -> Result<RileyCmsConfig> {
         let content = std::fs::read_to_string(path)?;
         toml::from_str(&content).map_err(|e| Error::ConfigParse {
             path: path.to_path_buf(),
@@ -161,7 +161,7 @@ impl Config {
 /// 4. Walk up ancestors looking for riley_cms.toml
 /// 5. ~/.config/riley_cms/config.toml (user default)
 /// 6. /etc/riley_cms/config.toml (system default)
-pub fn resolve_config(explicit_path: Option<&Path>) -> Result<RileyConfig> {
+pub fn resolve_config(explicit_path: Option<&Path>) -> Result<RileyCmsConfig> {
     let mut searched = Vec::new();
 
     // 1. Explicit path
@@ -248,7 +248,7 @@ repo_path = "/data/repo"
 bucket = "my-bucket"
 public_url_base = "https://assets.example.com"
 "#;
-        let config: RileyConfig = toml::from_str(toml).unwrap();
+        let config: RileyCmsConfig = toml::from_str(toml).unwrap();
         assert_eq!(config.content.repo_path, PathBuf::from("/data/repo"));
         assert_eq!(config.content.content_dir, "content"); // default
         assert_eq!(config.storage.bucket, "my-bucket");
@@ -287,7 +287,7 @@ on_content_update = ["https://example.com/webhook"]
 git_token = "secret123"
 api_token = "env:API_TOKEN"
 "#;
-        let config: RileyConfig = toml::from_str(toml).unwrap();
+        let config: RileyCmsConfig = toml::from_str(toml).unwrap();
         assert_eq!(config.content.content_dir, "posts");
         assert_eq!(config.storage.region, "us-east-1");
         assert_eq!(

@@ -1,4 +1,4 @@
-//! riley-api: HTTP API server for riley_cms
+//! riley-cms-api: HTTP API server for riley_cms
 
 mod handlers;
 pub mod middleware;
@@ -9,7 +9,7 @@ use axum::{
     routing::{any, get},
 };
 use middleware::auth_middleware;
-use riley_core::{Riley, RileyConfig};
+use riley_cms_core::{RileyCms, RileyCmsConfig};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tower_governor::GovernorLayer;
@@ -19,8 +19,8 @@ use tower_http::trace::TraceLayer;
 
 /// Application state shared across handlers
 pub struct AppState {
-    pub riley: Riley,
-    pub config: RileyConfig,
+    pub riley_cms: RileyCms,
+    pub config: RileyCmsConfig,
 }
 
 /// Build the versioned API routes
@@ -60,7 +60,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
 ///
 /// Defaults to denying all cross-origin requests if `cors_origins` is not configured.
 /// Set `cors_origins = ["*"]` to allow all origins, or specify explicit origins.
-fn build_cors_layer(config: &RileyConfig) -> CorsLayer {
+fn build_cors_layer(config: &RileyCmsConfig) -> CorsLayer {
     let origins = config
         .server
         .as_ref()
@@ -82,11 +82,11 @@ fn build_cors_layer(config: &RileyConfig) -> CorsLayer {
 ///
 /// The server will drain in-flight connections when receiving SIGINT (Ctrl+C)
 /// or SIGTERM (Docker stop / Kubernetes terminate).
-pub async fn serve(riley: Riley) -> anyhow::Result<()> {
-    let config = riley.config().clone();
+pub async fn serve(riley_cms: RileyCms) -> anyhow::Result<()> {
+    let config = riley_cms.config().clone();
     let server_config = config.server.clone().unwrap_or_default();
 
-    let state = Arc::new(AppState { riley, config });
+    let state = Arc::new(AppState { riley_cms, config });
 
     // Rate limiting: 50 burst capacity, replenish 10/second per IP.
     // Allows normal browsing but prevents brute-force on auth endpoints.

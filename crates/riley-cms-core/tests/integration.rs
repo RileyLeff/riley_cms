@@ -1,12 +1,12 @@
-//! Integration tests for riley-core
+//! Integration tests for riley-cms-core
 //!
-//! These tests verify the full Riley workflow works end-to-end.
+//! These tests verify the full RileyCms workflow works end-to-end.
 
-use riley_core::{ListOptions, Riley, RileyConfig};
+use riley_cms_core::{ListOptions, RileyCms, RileyCmsConfig};
 use std::fs;
 use tempfile::TempDir;
 
-fn create_test_config(temp_dir: &TempDir) -> RileyConfig {
+fn create_test_config(temp_dir: &TempDir) -> RileyCmsConfig {
     // Parse a minimal config
     let toml = format!(
         r#"
@@ -93,22 +93,25 @@ order = {}
 }
 
 #[tokio::test]
-async fn test_riley_with_empty_content() {
+async fn test_riley_cms_with_empty_content() {
     let temp_dir = TempDir::new().unwrap();
     let config = create_test_config(&temp_dir);
 
-    let riley = Riley::from_config(config).await.unwrap();
+    let riley_cms = RileyCms::from_config(config).await.unwrap();
 
-    let posts = riley.list_posts(&ListOptions::default()).await.unwrap();
+    let posts = riley_cms.list_posts(&ListOptions::default()).await.unwrap();
     assert_eq!(posts.total, 0);
     assert!(posts.items.is_empty());
 
-    let series = riley.list_series(&ListOptions::default()).await.unwrap();
+    let series = riley_cms
+        .list_series(&ListOptions::default())
+        .await
+        .unwrap();
     assert_eq!(series.total, 0);
 }
 
 #[tokio::test]
-async fn test_riley_list_posts() {
+async fn test_riley_cms_list_posts() {
     let temp_dir = TempDir::new().unwrap();
     let content_dir = temp_dir.path().join("content");
 
@@ -133,9 +136,9 @@ async fn test_riley_list_posts() {
     );
 
     let config = create_test_config(&temp_dir);
-    let riley = Riley::from_config(config).await.unwrap();
+    let riley_cms = RileyCms::from_config(config).await.unwrap();
 
-    let posts = riley.list_posts(&ListOptions::default()).await.unwrap();
+    let posts = riley_cms.list_posts(&ListOptions::default()).await.unwrap();
     assert_eq!(posts.total, 3);
     assert_eq!(posts.items.len(), 3);
 
@@ -146,7 +149,7 @@ async fn test_riley_list_posts() {
 }
 
 #[tokio::test]
-async fn test_riley_get_post() {
+async fn test_riley_cms_get_post() {
     let temp_dir = TempDir::new().unwrap();
     let content_dir = temp_dir.path().join("content");
 
@@ -158,20 +161,20 @@ async fn test_riley_get_post() {
     );
 
     let config = create_test_config(&temp_dir);
-    let riley = Riley::from_config(config).await.unwrap();
+    let riley_cms = RileyCms::from_config(config).await.unwrap();
 
-    let post = riley.get_post("my-post").await.unwrap().unwrap();
+    let post = riley_cms.get_post("my-post").await.unwrap().unwrap();
     assert_eq!(post.slug, "my-post");
     assert_eq!(post.title, "My Post");
     assert!(post.content.contains("# My Post"));
 
     // Non-existent post
-    let missing = riley.get_post("nonexistent").await.unwrap();
+    let missing = riley_cms.get_post("nonexistent").await.unwrap();
     assert!(missing.is_none());
 }
 
 #[tokio::test]
-async fn test_riley_drafts_and_scheduled() {
+async fn test_riley_cms_drafts_and_scheduled() {
     let temp_dir = TempDir::new().unwrap();
     let content_dir = temp_dir.path().join("content");
 
@@ -188,15 +191,15 @@ async fn test_riley_drafts_and_scheduled() {
     );
 
     let config = create_test_config(&temp_dir);
-    let riley = Riley::from_config(config).await.unwrap();
+    let riley_cms = RileyCms::from_config(config).await.unwrap();
 
     // Default: only live
-    let posts = riley.list_posts(&ListOptions::default()).await.unwrap();
+    let posts = riley_cms.list_posts(&ListOptions::default()).await.unwrap();
     assert_eq!(posts.total, 1);
     assert_eq!(posts.items[0].slug, "live");
 
     // Include drafts
-    let posts = riley
+    let posts = riley_cms
         .list_posts(&ListOptions {
             include_drafts: true,
             ..Default::default()
@@ -206,7 +209,7 @@ async fn test_riley_drafts_and_scheduled() {
     assert_eq!(posts.total, 2); // live + draft
 
     // Include scheduled
-    let posts = riley
+    let posts = riley_cms
         .list_posts(&ListOptions {
             include_scheduled: true,
             ..Default::default()
@@ -216,7 +219,7 @@ async fn test_riley_drafts_and_scheduled() {
     assert_eq!(posts.total, 2); // live + scheduled
 
     // Include both
-    let posts = riley
+    let posts = riley_cms
         .list_posts(&ListOptions {
             include_drafts: true,
             include_scheduled: true,
@@ -228,7 +231,7 @@ async fn test_riley_drafts_and_scheduled() {
 }
 
 #[tokio::test]
-async fn test_riley_series() {
+async fn test_riley_cms_series() {
     let temp_dir = TempDir::new().unwrap();
     let content_dir = temp_dir.path().join("content");
 
@@ -244,16 +247,19 @@ async fn test_riley_series() {
     );
 
     let config = create_test_config(&temp_dir);
-    let riley = Riley::from_config(config).await.unwrap();
+    let riley_cms = RileyCms::from_config(config).await.unwrap();
 
     // List series
-    let series_list = riley.list_series(&ListOptions::default()).await.unwrap();
+    let series_list = riley_cms
+        .list_series(&ListOptions::default())
+        .await
+        .unwrap();
     assert_eq!(series_list.total, 1);
     assert_eq!(series_list.items[0].slug, "rust-series");
     assert_eq!(series_list.items[0].post_count, 3);
 
     // Get series with posts
-    let series = riley.get_series("rust-series").await.unwrap().unwrap();
+    let series = riley_cms.get_series("rust-series").await.unwrap().unwrap();
     assert_eq!(series.title, "Learning Rust");
     assert_eq!(series.posts.len(), 3);
 
@@ -264,7 +270,7 @@ async fn test_riley_series() {
 }
 
 #[tokio::test]
-async fn test_riley_pagination() {
+async fn test_riley_cms_pagination() {
     let temp_dir = TempDir::new().unwrap();
     let content_dir = temp_dir.path().join("content");
 
@@ -279,10 +285,10 @@ async fn test_riley_pagination() {
     }
 
     let config = create_test_config(&temp_dir);
-    let riley = Riley::from_config(config).await.unwrap();
+    let riley_cms = RileyCms::from_config(config).await.unwrap();
 
     // Limit to 2
-    let posts = riley
+    let posts = riley_cms
         .list_posts(&ListOptions {
             limit: Some(2),
             ..Default::default()
@@ -295,7 +301,7 @@ async fn test_riley_pagination() {
     assert_eq!(posts.offset, 0);
 
     // Offset 2, limit 2
-    let posts = riley
+    let posts = riley_cms
         .list_posts(&ListOptions {
             limit: Some(2),
             offset: Some(2),
@@ -308,7 +314,7 @@ async fn test_riley_pagination() {
 }
 
 #[tokio::test]
-async fn test_riley_content_validation() {
+async fn test_riley_cms_content_validation() {
     let temp_dir = TempDir::new().unwrap();
     let content_dir = temp_dir.path().join("content");
 
@@ -333,15 +339,15 @@ preview_text = "Preview"
     fs::write(bad_post.join("content.mdx"), "# Content").unwrap();
 
     let config = create_test_config(&temp_dir);
-    let riley = Riley::from_config(config).await.unwrap();
+    let riley_cms = RileyCms::from_config(config).await.unwrap();
 
-    let errors = riley.validate_content().await.unwrap();
+    let errors = riley_cms.validate_content().await.unwrap();
     assert!(!errors.is_empty());
     assert!(errors.iter().any(|e| e.message.contains("Title")));
 }
 
 #[tokio::test]
-async fn test_riley_refresh() {
+async fn test_riley_cms_refresh() {
     let temp_dir = TempDir::new().unwrap();
     let content_dir = temp_dir.path().join("content");
 
@@ -354,9 +360,9 @@ async fn test_riley_refresh() {
     );
 
     let config = create_test_config(&temp_dir);
-    let riley = Riley::from_config(config).await.unwrap();
+    let riley_cms = RileyCms::from_config(config).await.unwrap();
 
-    let posts = riley.list_posts(&ListOptions::default()).await.unwrap();
+    let posts = riley_cms.list_posts(&ListOptions::default()).await.unwrap();
     assert_eq!(posts.total, 1);
 
     // Add another post
@@ -368,17 +374,17 @@ async fn test_riley_refresh() {
     );
 
     // Before refresh, still shows 1
-    let posts = riley.list_posts(&ListOptions::default()).await.unwrap();
+    let posts = riley_cms.list_posts(&ListOptions::default()).await.unwrap();
     assert_eq!(posts.total, 1);
 
     // After refresh, shows 2
-    riley.refresh().await.unwrap();
-    let posts = riley.list_posts(&ListOptions::default()).await.unwrap();
+    riley_cms.refresh().await.unwrap();
+    let posts = riley_cms.list_posts(&ListOptions::default()).await.unwrap();
     assert_eq!(posts.total, 2);
 }
 
 #[tokio::test]
-async fn test_riley_etag() {
+async fn test_riley_cms_etag() {
     let temp_dir = TempDir::new().unwrap();
     let content_dir = temp_dir.path().join("content");
 
@@ -390,21 +396,21 @@ async fn test_riley_etag() {
     );
 
     let config = create_test_config(&temp_dir);
-    let riley = Riley::from_config(config).await.unwrap();
+    let riley_cms = RileyCms::from_config(config).await.unwrap();
 
-    let etag1 = riley.content_etag().await;
+    let etag1 = riley_cms.content_etag().await;
     assert!(!etag1.is_empty());
     assert!(etag1.starts_with('"'));
     assert!(etag1.ends_with('"'));
 
     // Same content = same etag
-    let etag2 = riley.content_etag().await;
+    let etag2 = riley_cms.content_etag().await;
     assert_eq!(etag1, etag2);
 
     // Modify content and refresh
     fs::write(content_dir.join("post-1/content.mdx"), "# Modified Content").unwrap();
-    riley.refresh().await.unwrap();
+    riley_cms.refresh().await.unwrap();
 
-    let etag3 = riley.content_etag().await;
+    let etag3 = riley_cms.content_etag().await;
     assert_ne!(etag1, etag3);
 }

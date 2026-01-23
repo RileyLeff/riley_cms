@@ -12,8 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Initial release of riley_cms
-- **riley-core**: Core library with content parsing, S3 storage, and caching
-  - `Riley` struct for all CMS operations
+- **riley-cms-core**: Core library with content parsing, S3 storage, and caching
+  - `RileyCms` struct for all CMS operations
   - Content loading from Git-based directory structure
   - Support for standalone posts and series
   - Visibility model: drafts, scheduled, and live content
@@ -22,13 +22,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Content validation
   - S3/R2 asset storage integration
   - Webhook firing on content updates
-- **riley-api**: HTTP API server built on Axum
+- **riley-cms-api**: HTTP API server built on Axum
   - REST endpoints for posts, series, and assets
   - Pagination support with limit/offset
   - Cache-Control and ETag headers
   - CORS configuration
   - Health check endpoint
-- **riley-cli**: Command-line interface
+- **riley-cms-cli**: Command-line interface
   - `serve` - Run the HTTP API server
   - `init` - Initialize content structure
   - `upload` - Upload assets to S3/R2

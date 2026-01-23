@@ -1,12 +1,12 @@
-//! Integration tests for riley-api HTTP endpoints
+//! Integration tests for riley-cms-api HTTP endpoints
 
 use axum::{
     body::Body,
     http::{Request, StatusCode, header},
 };
 use http_body_util::BodyExt;
-use riley_api::{AppState, build_router};
-use riley_core::{Riley, RileyConfig};
+use riley_cms_api::{AppState, build_router};
+use riley_cms_core::{RileyCms, RileyCmsConfig};
 use serde_json::Value;
 use std::fs;
 use std::sync::Arc;
@@ -14,7 +14,7 @@ use tempfile::TempDir;
 use tower::ServiceExt;
 
 /// Create a minimal test config
-fn create_test_config(temp_dir: &TempDir) -> RileyConfig {
+fn create_test_config(temp_dir: &TempDir) -> RileyCmsConfig {
     let toml_content = format!(
         r#"
 [content]
@@ -64,8 +64,8 @@ preview_text = "Preview for {}"
 /// Helper to setup test environment and build router
 async fn setup_test_app(temp_dir: &TempDir) -> axum::Router {
     let config = create_test_config(temp_dir);
-    let riley = Riley::from_config(config.clone()).await.unwrap();
-    let state = Arc::new(AppState { riley, config });
+    let riley_cms = RileyCms::from_config(config.clone()).await.unwrap();
+    let state = Arc::new(AppState { riley_cms, config });
     build_router(state)
 }
 

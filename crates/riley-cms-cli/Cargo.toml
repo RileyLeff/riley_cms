@@ -1,5 +1,5 @@
 [package]
-name = "riley-cli"
+name = "riley-cms-cli"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,7 +9,7 @@ authors.workspace = true
 keywords.workspace = true
 categories.workspace = true
 description = "CLI for riley_cms - serve, validate, and manage your headless CMS"
-documentation = "https://docs.rs/riley-cli"
+documentation = "https://docs.rs/riley-cms-cli"
 readme = "../../README.md"
 
 [[bin]]
@@ -17,8 +17,8 @@ name = "riley_cms"
 path = "src/main.rs"
 
 [dependencies]
-riley-core = { workspace = true }
-riley-api = { workspace = true }
+riley-cms-core = { workspace = true }
+riley-cms-api = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

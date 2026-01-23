@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use riley_core::{Riley, resolve_config};
+use riley_cms_core::{RileyCms, resolve_config};
 use std::path::PathBuf;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -97,8 +97,8 @@ async fn main() -> Result<()> {
 
 async fn cmd_serve(config_path: Option<&std::path::Path>) -> Result<()> {
     let config = resolve_config(config_path)?;
-    let riley = Riley::from_config(config).await?;
-    riley_api::serve(riley).await?;
+    let riley_cms = RileyCms::from_config(config).await?;
+    riley_cms_api::serve(riley_cms).await?;
     Ok(())
 }
 
@@ -183,10 +183,10 @@ async fn cmd_upload(
     dest: Option<&str>,
 ) -> Result<()> {
     let config = resolve_config(config_path)?;
-    let riley = Riley::from_config(config).await?;
+    let riley_cms = RileyCms::from_config(config).await?;
 
     println!("Uploading {}...", file.display());
-    let asset = riley.upload_asset(file, dest).await?;
+    let asset = riley_cms.upload_asset(file, dest).await?;
     println!("{}", asset.url);
 
     Ok(())
@@ -194,17 +194,17 @@ async fn cmd_upload(
 
 async fn cmd_ls(config_path: Option<&std::path::Path>, what: LsCommands) -> Result<()> {
     let config = resolve_config(config_path)?;
-    let riley = Riley::from_config(config).await?;
+    let riley_cms = RileyCms::from_config(config).await?;
 
     match what {
         LsCommands::Posts { drafts } => {
-            let opts = riley_core::ListOptions {
+            let opts = riley_cms_core::ListOptions {
                 include_drafts: drafts,
                 include_scheduled: drafts,
                 limit: None,
                 offset: None,
             };
-            let result = riley.list_posts(&opts).await?;
+            let result = riley_cms.list_posts(&opts).await?;
 
             if result.items.is_empty() {
                 println!("No posts found.");
@@ -221,13 +221,13 @@ async fn cmd_ls(config_path: Option<&std::path::Path>, what: LsCommands) -> Resu
             }
         }
         LsCommands::Series { drafts } => {
-            let opts = riley_core::ListOptions {
+            let opts = riley_cms_core::ListOptions {
                 include_drafts: drafts,
                 include_scheduled: drafts,
                 limit: None,
                 offset: None,
             };
-            let result = riley.list_series(&opts).await?;
+            let result = riley_cms.list_series(&opts).await?;
 
             if result.items.is_empty() {
                 println!("No series found.");
@@ -248,10 +248,10 @@ async fn cmd_ls(config_path: Option<&std::path::Path>, what: LsCommands) -> Resu
         }
         LsCommands::Assets => {
             let mut total = 0usize;
-            let mut opts = riley_core::AssetListOptions::default();
+            let mut opts = riley_cms_core::AssetListOptions::default();
 
             loop {
-                let result = riley.list_assets(&opts).await?;
+                let result = riley_cms.list_assets(&opts).await?;
 
                 for asset in &result.assets {
                     let size = format_size(asset.size);
@@ -283,9 +283,9 @@ async fn cmd_ls(config_path: Option<&std::path::Path>, what: LsCommands) -> Resu
 
 async fn cmd_validate(config_path: Option<&std::path::Path>) -> Result<()> {
     let config = resolve_config(config_path)?;
-    let riley = Riley::from_config(config).await?;
+    let riley_cms = RileyCms::from_config(config).await?;
 
-    let errors = riley.validate_content().await?;
+    let errors = riley_cms.validate_content().await?;
 
     if errors.is_empty() {
         println!("✓ Content is valid");

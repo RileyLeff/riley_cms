@@ -1,12 +1,12 @@
-//! Error types for riley-core
+//! Error types for riley-cms-core
 
 use std::path::PathBuf;
 use thiserror::Error;
 
-/// Result type for riley-core operations
+/// Result type for riley-cms-core operations
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// Error types for riley-core
+/// Error types for riley-cms-core
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("Config error: {0}")]
