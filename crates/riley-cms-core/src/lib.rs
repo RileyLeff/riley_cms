@@ -71,6 +71,7 @@ mod config;
 mod content;
 mod error;
 pub mod git;
+mod security;
 mod storage;
 mod types;
 
@@ -272,49 +273,6 @@ impl RileyCms {
     }
 }
 
-/// Check if an IP address is in a private range (RFC 1918 / RFC 4193).
-fn is_private_ip(ip: &std::net::IpAddr) -> bool {
-    match ip {
-        std::net::IpAddr::V4(v4) => {
-            let octets = v4.octets();
-            // 10.0.0.0/8
-            octets[0] == 10
-            // 172.16.0.0/12
-            || (octets[0] == 172 && (16..=31).contains(&octets[1]))
-            // 192.168.0.0/16
-            || (octets[0] == 192 && octets[1] == 168)
-            // 100.64.0.0/10 (Carrier-grade NAT)
-            || (octets[0] == 100 && (64..=127).contains(&octets[1]))
-        }
-        std::net::IpAddr::V6(v6) => {
-            let segments = v6.segments();
-            // fc00::/7 (Unique Local Addresses)
-            (segments[0] & 0xfe00) == 0xfc00
-        }
-    }
-}
-
-/// Check if an IP address is link-local (169.254.0.0/16 or fe80::/10).
-fn is_link_local(ip: &std::net::IpAddr) -> bool {
-    match ip {
-        std::net::IpAddr::V4(v4) => {
-            let octets = v4.octets();
-            // 169.254.0.0/16 (includes AWS metadata endpoint 169.254.169.254)
-            octets[0] == 169 && octets[1] == 254
-        }
-        std::net::IpAddr::V6(v6) => {
-            let segments = v6.segments();
-            // fe80::/10
-            (segments[0] & 0xffc0) == 0xfe80
-        }
-    }
-}
-
-/// Check if a socket address is safe (not private/loopback/link-local).
-fn is_safe_ip(ip: &std::net::IpAddr) -> bool {
-    !ip.is_loopback() && !ip.is_unspecified() && !is_private_ip(ip) && !is_link_local(ip)
-}
-
 /// Maximum number of retry attempts for webhook delivery.
 const WEBHOOK_MAX_RETRIES: u32 = 3;
 
@@ -363,7 +321,7 @@ async fn send_webhook(url: &str, secret: Option<&str>) {
     };
 
     // 3. Find a safe (non-private) IP address to connect to
-    let safe_addr = match addrs.into_iter().find(|a| is_safe_ip(&a.ip())) {
+    let safe_addr = match addrs.into_iter().find(|a| security::is_safe_ip(&a.ip())) {
         Some(a) => a,
         None => {
             tracing::warn!(
@@ -375,8 +333,10 @@ async fn send_webhook(url: &str, secret: Option<&str>) {
     };
 
     // 4. Build client pinned to the validated IP (prevents DNS rebinding)
+    //    Redirects disabled to prevent SSRF bypass via 302 to internal IPs.
     let client = reqwest::Client::builder()
         .resolve(&host, safe_addr)
+        .redirect(reqwest::redirect::Policy::none())
         .timeout(std::time::Duration::from_secs(10))
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());

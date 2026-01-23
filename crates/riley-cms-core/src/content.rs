@@ -267,12 +267,16 @@ impl ContentCache {
     fn compute_etag(posts: &HashMap<String, Post>, series: &HashMap<String, SeriesData>) -> String {
         let mut hasher = Sha256::new();
 
-        // Sort keys for deterministic output
+        // Sort keys for deterministic output.
+        // Length-prefix each field to prevent concatenation collisions
+        // (e.g., slug="ab" content="c" vs slug="a" content="bc").
         let mut post_keys: Vec<_> = posts.keys().collect();
         post_keys.sort();
         for key in post_keys {
             if let Some(post) = posts.get(key) {
+                hasher.update((key.len() as u64).to_le_bytes());
                 hasher.update(key.as_bytes());
+                hasher.update((post.content.len() as u64).to_le_bytes());
                 hasher.update(post.content.as_bytes());
             }
         }
@@ -280,6 +284,7 @@ impl ContentCache {
         let mut series_keys: Vec<_> = series.keys().collect();
         series_keys.sort();
         for key in series_keys {
+            hasher.update((key.len() as u64).to_le_bytes());
             hasher.update(key.as_bytes());
         }
 

@@ -554,28 +554,24 @@ pub async fn git_handler(
                 }
             };
 
-            // Spawn a task to await process completion and fire webhooks if needed
-            if is_write_operation {
-                let state_clone = state.clone();
-                tokio::spawn(async move {
-                    match cgi_response.completion.wait().await {
-                        Ok(exit_status) => {
-                            if exit_status.success() {
-                                if let Err(e) = state_clone.riley_cms.refresh().await {
-                                    tracing::error!(
-                                        "Failed to refresh content after git push: {}",
-                                        e
-                                    );
-                                }
-                                state_clone.riley_cms.fire_webhooks().await;
+            // Always spawn a task to reap the child process (prevents zombies).
+            // Only trigger refresh/webhooks for successful write operations.
+            let state_clone = state.clone();
+            tokio::spawn(async move {
+                match cgi_response.completion.wait().await {
+                    Ok(exit_status) => {
+                        if is_write_operation && exit_status.success() {
+                            if let Err(e) = state_clone.riley_cms.refresh().await {
+                                tracing::error!("Failed to refresh content after git push: {}", e);
                             }
-                        }
-                        Err(e) => {
-                            tracing::error!("Git CGI completion error: {}", e);
+                            state_clone.riley_cms.fire_webhooks().await;
                         }
                     }
-                });
-            }
+                    Err(e) => {
+                        tracing::error!("Git CGI completion error: {}", e);
+                    }
+                }
+            });
 
             response
         }
