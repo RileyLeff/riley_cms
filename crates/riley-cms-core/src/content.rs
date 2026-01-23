@@ -41,6 +41,7 @@ impl ContentCache {
         let mut posts = HashMap::new();
         let mut series = HashMap::new();
         let mut errors = 0u32;
+        let mut total_bytes: u64 = 0;
 
         // Iterate through content directory
         for entry in fs::read_dir(&content_path)? {
@@ -55,7 +56,10 @@ impl ContentCache {
             let path = entry.path();
 
             // Security: DirEntry::file_type() does NOT follow symlinks,
-            // preventing symlink traversal attacks (e.g., content.mdx -> /etc/passwd)
+            // preventing symlink traversal attacks (e.g., content.mdx -> /etc/passwd).
+            // Note: A theoretical TOCTOU race exists between this check and subsequent
+            // file reads, but it requires local filesystem access during the microsecond
+            // window and is not exploitable via the git push interface alone.
             let file_type = match entry.file_type() {
                 Ok(ft) => ft,
                 Err(e) => {
@@ -84,11 +88,25 @@ impl ContentCache {
                 }
             };
 
+            // Check total content size limit before loading more
+            if total_bytes > config.max_total_content_size {
+                tracing::error!(
+                    "Total content size ({} bytes) exceeds limit ({} bytes). \
+                     Skipping remaining content.",
+                    total_bytes,
+                    config.max_total_content_size
+                );
+                break;
+            }
+
             // Check if this is a series (has series.toml)
             let series_toml = path.join("series.toml");
             if series_toml.exists() {
                 match Self::load_series(&path, &slug, config.max_content_file_size) {
                     Ok((series_data, series_posts)) => {
+                        for post in &series_posts {
+                            total_bytes += post.content.len() as u64;
+                        }
                         series.insert(slug.clone(), series_data);
                         for post in series_posts {
                             posts.insert(post.slug.clone(), post);
@@ -107,6 +125,7 @@ impl ContentCache {
                 if config_toml.exists() && content_mdx.exists() {
                     match Self::load_post(&path, &slug, None, config.max_content_file_size) {
                         Ok(post) => {
+                            total_bytes += post.content.len() as u64;
                             posts.insert(slug, post);
                         }
                         Err(e) => {
@@ -502,6 +521,7 @@ mod tests {
             repo_path: temp_dir.path().to_path_buf(),
             content_dir: "content".to_string(),
             max_content_file_size: 5 * 1024 * 1024,
+            max_total_content_size: 100 * 1024 * 1024,
         }
     }
 

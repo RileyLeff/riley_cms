@@ -46,6 +46,11 @@ pub struct ContentConfig {
     /// Files exceeding this limit are skipped with a warning. Default: 5MB.
     #[serde(default = "default_max_content_file_size")]
     pub max_content_file_size: u64,
+    /// Maximum total size in bytes for all content loaded into memory.
+    /// If exceeded during loading, remaining content is skipped with a warning.
+    /// Default: 100MB.
+    #[serde(default = "default_max_total_content_size")]
+    pub max_total_content_size: u64,
 }
 
 fn default_content_dir() -> String {
@@ -54,6 +59,10 @@ fn default_content_dir() -> String {
 
 fn default_max_content_file_size() -> u64 {
     5 * 1024 * 1024 // 5 MB
+}
+
+fn default_max_total_content_size() -> u64 {
+    100 * 1024 * 1024 // 100 MB
 }
 
 /// Storage backend configuration
@@ -89,6 +98,11 @@ pub struct ServerConfig {
     pub cache_max_age: u32,
     #[serde(default = "default_cache_stale_while_revalidate")]
     pub cache_stale_while_revalidate: u32,
+    /// When true, extract client IP from X-Forwarded-For/X-Real-IP headers
+    /// for rate limiting. Only enable when deployed behind a trusted reverse proxy.
+    /// When false (default), uses the TCP peer address directly.
+    #[serde(default)]
+    pub behind_proxy: bool,
 }
 
 fn default_host() -> String {
@@ -115,6 +129,7 @@ impl Default for ServerConfig {
             cors_origins: vec![],
             cache_max_age: default_cache_max_age(),
             cache_stale_while_revalidate: default_cache_stale_while_revalidate(),
+            behind_proxy: false,
         }
     }
 }

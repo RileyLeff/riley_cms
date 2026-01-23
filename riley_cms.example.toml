@@ -19,6 +19,10 @@ content_dir = "content"
 # Files exceeding this limit are skipped with a warning. Default: 5MB (5242880)
 # max_content_file_size = 5242880
 
+# Maximum total size in bytes for all content loaded into memory.
+# If exceeded, remaining content is skipped. Default: 100MB (104857600)
+# max_total_content_size = 104857600
+
 [storage]
 # Storage backend (currently only "s3" is supported)
 backend = "s3"
@@ -51,6 +55,11 @@ cache_max_age = 60
 
 # Cache-Control stale-while-revalidate in seconds
 cache_stale_while_revalidate = 300
+
+# Set to true when deployed behind a reverse proxy (nginx, Cloudflare, etc.)
+# Enables rate limiting by client IP from X-Forwarded-For/X-Real-IP headers.
+# WARNING: Only enable if your proxy is trusted and sets these headers correctly.
+# behind_proxy = false
 
 # [git]
 # Explicit path to git-http-backend binary (auto-discovered if not set)

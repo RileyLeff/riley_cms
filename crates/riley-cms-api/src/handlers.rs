@@ -363,7 +363,13 @@ fn check_git_basic_auth(headers: &HeaderMap, state: &AppState) -> bool {
     let expected_token = match &state.config.auth {
         Some(auth) => match &auth.git_token {
             Some(token_config) => match token_config.resolve() {
-                Ok(token) => token,
+                Ok(token) => {
+                    if token.is_empty() {
+                        tracing::warn!("Git token resolves to empty string. Git auth disabled.");
+                        return false;
+                    }
+                    token
+                }
                 Err(e) => {
                     tracing::warn!("Failed to resolve git token: {}. Git auth disabled.", e);
                     return false;

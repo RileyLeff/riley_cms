@@ -5,17 +5,47 @@ pub mod middleware;
 
 use axum::{
     Router,
+    http::{HeaderValue, header},
     middleware::from_fn_with_state,
     routing::{any, get},
 };
 use middleware::auth_middleware;
 use riley_cms_core::{RileyCms, RileyCmsConfig};
+use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use tower_governor::GovernorError;
 use tower_governor::GovernorLayer;
 use tower_governor::governor::GovernorConfigBuilder;
+use tower_governor::key_extractor::{KeyExtractor, PeerIpKeyExtractor, SmartIpKeyExtractor};
 use tower_http::cors::CorsLayer;
+use tower_http::set_header::SetResponseHeaderLayer;
 use tower_http::trace::TraceLayer;
+
+/// Rate-limit key extractor that respects proxy configuration.
+///
+/// When `behind_proxy` is true, extracts the client IP from X-Forwarded-For,
+/// X-Real-IP, or the Forwarded header (in that order). This is appropriate when
+/// deployed behind a trusted reverse proxy (nginx, Cloudflare, etc.).
+///
+/// When `behind_proxy` is false (default), uses the TCP peer address directly.
+/// This is correct for direct-to-internet deployments.
+#[derive(Debug, Clone, Copy)]
+struct RileyCmsKeyExtractor {
+    behind_proxy: bool,
+}
+
+impl KeyExtractor for RileyCmsKeyExtractor {
+    type Key = IpAddr;
+
+    fn extract<T>(&self, req: &axum::http::Request<T>) -> Result<Self::Key, GovernorError> {
+        if self.behind_proxy {
+            SmartIpKeyExtractor.extract(req)
+        } else {
+            PeerIpKeyExtractor.extract(req)
+        }
+    }
+}
 
 /// Application state shared across handlers
 pub struct AppState {
@@ -53,6 +83,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         // State and other middleware
         .with_state(state)
         .layer(cors)
+        .layer(SetResponseHeaderLayer::overriding(
+            header::X_CONTENT_TYPE_OPTIONS,
+            HeaderValue::from_static("nosniff"),
+        ))
         .layer(
             TraceLayer::new_for_http().make_span_with(
                 tower_http::trace::DefaultMakeSpan::new()
@@ -97,7 +131,16 @@ pub async fn serve(riley_cms: RileyCms) -> anyhow::Result<()> {
     // Rate limiting: 50 burst capacity, replenish 10/second per IP.
     // Allows normal browsing but prevents brute-force on auth endpoints.
     // Applied here (not in build_router) because it requires real TCP peer IP.
+    let key_extractor = RileyCmsKeyExtractor {
+        behind_proxy: server_config.behind_proxy,
+    };
+    if server_config.behind_proxy {
+        tracing::info!(
+            "Rate limiter using proxy headers (X-Forwarded-For/X-Real-IP) for client IP"
+        );
+    }
     let governor_conf = GovernorConfigBuilder::default()
+        .key_extractor(key_extractor)
         .per_second(10)
         .burst_size(50)
         .finish()
