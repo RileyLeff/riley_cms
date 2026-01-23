@@ -352,6 +352,7 @@ pub async fn health() -> Response {
 use axum::http::HeaderMap;
 use base64::Engine;
 use riley_cms_core::GitBackend;
+use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 
 /// Check Basic Auth for Git operations
@@ -410,10 +411,11 @@ fn check_git_basic_auth(headers: &HeaderMap, state: &AppState) -> bool {
     // Format: "username:password" - we only check password (the token)
     // Username can be anything (commonly "git" or the actual username)
     if let Some((_username, password)) = credentials.split_once(':') {
-        // Use constant-time comparison to prevent timing attacks
-        let provided = password.as_bytes();
-        let expected = expected_token.as_bytes();
-        provided.len() == expected.len() && provided.ct_eq(expected).into()
+        // Hash both tokens before comparing to prevent leaking
+        // token length via timing side-channel.
+        let provided_hash = Sha256::digest(password.as_bytes());
+        let expected_hash = Sha256::digest(expected_token.as_bytes());
+        provided_hash.ct_eq(&expected_hash).into()
     } else {
         false
     }
