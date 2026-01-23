@@ -5,7 +5,7 @@ pub mod middleware;
 
 use axum::{
     Router,
-    http::{HeaderValue, header},
+    http::{HeaderValue, Method, header},
     middleware::from_fn_with_state,
     routing::{any, get},
 };
@@ -119,7 +119,10 @@ fn build_cors_layer(config: &RileyCmsConfig) -> CorsLayer {
         Some(origins) if origins.iter().any(|o| o == "*") => CorsLayer::permissive(),
         Some(origins) => {
             let origins: Vec<_> = origins.iter().filter_map(|o| o.parse().ok()).collect();
-            CorsLayer::new().allow_origin(origins)
+            CorsLayer::new()
+                .allow_origin(origins)
+                .allow_methods([Method::GET, Method::OPTIONS])
+                .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE])
         }
         // Default: deny all cross-origin requests (secure by default)
         None => CorsLayer::new(),

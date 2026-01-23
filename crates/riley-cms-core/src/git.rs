@@ -374,8 +374,7 @@ async fn read_cgi_headers<R: tokio::io::AsyncBufRead + Unpin>(
         }
 
         // Parse "Key: Value" header line
-        let line_str = std::str::from_utf8(trimmed)
-            .map_err(|_| Error::Git("CGI header contains invalid UTF-8".to_string()))?;
+        let line_str = String::from_utf8_lossy(trimmed);
         if let Some((key, value)) = line_str.split_once(':') {
             let key = key.trim().to_lowercase();
             let value = value.trim().to_string();

@@ -132,7 +132,16 @@ impl Storage {
             .ok_or_else(|| Error::Storage("Invalid file name".to_string()))?;
 
         let key = match dest {
-            Some(prefix) => format!("{}/{}", prefix.trim_matches('/'), file_name),
+            Some(prefix) => {
+                // Reject path traversal attempts in the destination prefix
+                let sanitized = prefix.trim_matches('/');
+                if sanitized.split('/').any(|seg| seg == "..") {
+                    return Err(Error::Storage(
+                        "Invalid destination: path traversal not allowed".to_string(),
+                    ));
+                }
+                format!("{}/{}", sanitized, file_name)
+            }
             None => file_name.to_string(),
         };
 
