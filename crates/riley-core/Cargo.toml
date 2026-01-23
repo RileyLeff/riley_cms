@@ -28,6 +28,10 @@ hmac = { workspace = true }
 hex = { workspace = true }
 dirs = { workspace = true }
 mime_guess = { workspace = true }
+tokio-util = { workspace = true }
+futures-util = { workspace = true }
+bytes = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3.15"
+temp-env = "0.3"

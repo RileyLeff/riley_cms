@@ -8,6 +8,7 @@ use axum::{
     http::{StatusCode, header},
     response::{IntoResponse, Response},
 };
+use futures_util::StreamExt;
 use riley_core::ListOptions;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -350,7 +351,6 @@ pub async fn health() -> Response {
 
 use axum::http::HeaderMap;
 use base64::Engine;
-use http_body_util::BodyExt;
 use riley_core::GitBackend;
 use subtle::ConstantTimeEq;
 
@@ -431,6 +431,7 @@ fn is_valid_git_path(path: &str) -> bool {
 ///
 /// Handles all Git HTTP protocol requests by proxying to git-http-backend.
 /// Supports both read (fetch/clone) and write (push) operations.
+/// Request bodies and CGI responses are streamed to avoid buffering large payloads.
 pub async fn git_handler(
     State(state): State<Arc<AppState>>,
     Path(path): Path<String>,
@@ -452,37 +453,7 @@ pub async fn git_handler(
     let headers = request.headers().clone();
     let uri = request.uri().clone();
 
-    // Extract body with size limit to prevent DoS
-    let body = match request.into_body().collect().await {
-        Ok(collected) => collected.to_bytes(),
-        Err(e) => {
-            tracing::warn!("Failed to read git request body: {}", e);
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(ErrorResponse {
-                    error: "Failed to read request body".to_string(),
-                }),
-            )
-                .into_response();
-        }
-    };
-
-    // Reject oversized bodies to prevent OOM
-    if body.len() > GIT_MAX_BODY_SIZE {
-        return (
-            StatusCode::PAYLOAD_TOO_LARGE,
-            Json(ErrorResponse {
-                error: format!(
-                    "Request body too large ({} bytes, max {} bytes)",
-                    body.len(),
-                    GIT_MAX_BODY_SIZE
-                ),
-            }),
-        )
-            .into_response();
-    }
-
-    // Check Basic Auth
+    // Check Basic Auth before consuming the body
     if !check_git_basic_auth(&headers, &state) {
         return (
             StatusCode::UNAUTHORIZED,
@@ -518,33 +489,47 @@ pub async fn git_handler(
     // Extract query string from URI
     let query_string = uri.query().map(String::from);
 
-    // Get content type
+    // Get content type and content length
     let content_type = headers
         .get(header::CONTENT_TYPE)
         .and_then(|h| h.to_str().ok())
         .map(String::from);
 
+    let content_length = headers
+        .get(header::CONTENT_LENGTH)
+        .and_then(|h| h.to_str().ok())
+        .and_then(|s| s.parse::<u64>().ok());
+
     // Determine if this is a write operation (push)
     let is_write_operation = path.contains("git-receive-pack");
 
-    // Run the Git CGI backend
+    // Convert request body to a stream for incremental processing
+    let body_stream = request
+        .into_body()
+        .into_data_stream()
+        .map(|result| result.map_err(std::io::Error::other));
+
+    // Run the Git CGI backend with streaming
     match backend
         .run_cgi(
             method.as_str(),
             &path_info,
             query_string.as_deref(),
             content_type.as_deref(),
-            &body,
+            content_length,
+            body_stream,
+            GIT_MAX_BODY_SIZE as u64,
         )
         .await
     {
         Ok(cgi_response) => {
-            let status = StatusCode::from_u16(cgi_response.status).unwrap_or(StatusCode::OK);
+            let status =
+                StatusCode::from_u16(cgi_response.headers.status).unwrap_or(StatusCode::OK);
 
             let mut response_builder = Response::builder().status(status);
 
             // Copy headers from CGI response
-            for (key, value) in &cgi_response.headers {
+            for (key, value) in &cgi_response.headers.headers {
                 if let Ok(header_name) = key.parse::<axum::http::header::HeaderName>()
                     && let Ok(header_value) = value.parse::<axum::http::header::HeaderValue>()
                 {
@@ -552,7 +537,10 @@ pub async fn git_handler(
                 }
             }
 
-            let response = match response_builder.body(axum::body::Body::from(cgi_response.body)) {
+            // Build streaming response body
+            let response = match response_builder
+                .body(axum::body::Body::from_stream(cgi_response.body_stream))
+            {
                 Ok(r) => r,
                 Err(e) => {
                     tracing::error!("Failed to build response from CGI output: {}", e);
@@ -566,14 +554,26 @@ pub async fn git_handler(
                 }
             };
 
-            // If this was a successful push, refresh the cache and fire webhooks
-            if is_write_operation && status.is_success() {
+            // Spawn a task to await process completion and fire webhooks if needed
+            if is_write_operation {
                 let state_clone = state.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = state_clone.riley.refresh().await {
-                        tracing::error!("Failed to refresh content after git push: {}", e);
+                    match cgi_response.completion.wait().await {
+                        Ok(exit_status) => {
+                            if exit_status.success() {
+                                if let Err(e) = state_clone.riley.refresh().await {
+                                    tracing::error!(
+                                        "Failed to refresh content after git push: {}",
+                                        e
+                                    );
+                                }
+                                state_clone.riley.fire_webhooks().await;
+                            }
+                        }
+                        Err(e) => {
+                            tracing::error!("Git CGI completion error: {}", e);
+                        }
                     }
-                    state_clone.riley.fire_webhooks().await;
                 });
             }
 
@@ -581,6 +581,17 @@ pub async fn git_handler(
         }
         Err(e) => {
             tracing::error!("Git CGI error: {}", e);
+
+            // Check if this was a body-too-large error
+            let error_msg = e.to_string();
+            if error_msg.contains("exceeds maximum") {
+                return (
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    Json(ErrorResponse { error: error_msg }),
+                )
+                    .into_response();
+            }
+
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ErrorResponse {

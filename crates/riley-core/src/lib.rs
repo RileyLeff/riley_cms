@@ -77,7 +77,7 @@ mod types;
 pub use config::{Config, GitConfig, RileyConfig, resolve_config};
 pub use content::ContentCache;
 pub use error::{Error, Result};
-pub use git::{GitBackend, GitCgiResponse};
+pub use git::{BodyStream, GitBackend, GitCgiCompletion, GitCgiHeaders, GitCgiStreamResponse};
 pub use storage::Storage;
 pub use types::*;
 

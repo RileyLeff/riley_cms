@@ -226,15 +226,10 @@ mod tests {
 
     #[test]
     fn test_config_value_env() {
-        // SAFETY: This test runs in isolation and doesn't access the env var from other threads
-        unsafe {
-            std::env::set_var("TEST_RILEY_VAR", "from_env");
-        }
-        let val = ConfigValue::Literal("env:TEST_RILEY_VAR".to_string());
-        assert_eq!(val.resolve().unwrap(), "from_env");
-        unsafe {
-            std::env::remove_var("TEST_RILEY_VAR");
-        }
+        temp_env::with_var("TEST_RILEY_VAR", Some("from_env"), || {
+            let val = ConfigValue::Literal("env:TEST_RILEY_VAR".to_string());
+            assert_eq!(val.resolve().unwrap(), "from_env");
+        });
     }
 
     #[test]

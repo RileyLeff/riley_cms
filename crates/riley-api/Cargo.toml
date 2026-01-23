@@ -30,6 +30,7 @@ base64 = "0.22"
 http-body-util = "0.1"
 subtle = { workspace = true }
 sha2 = { workspace = true }
+futures-util = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3.19"
