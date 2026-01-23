@@ -249,13 +249,26 @@ impl RileyCms {
     pub async fn fire_webhooks(&self) {
         if let Some(ref webhooks) = self.config.webhooks {
             // Resolve webhook secret once (if configured)
-            let secret = webhooks.secret.as_ref().and_then(|s| match s.resolve() {
-                Ok(v) => Some(v),
-                Err(e) => {
-                    tracing::warn!("Failed to resolve webhook secret: {}. Sending unsigned.", e);
-                    None
+            let secret = if let Some(ref secret_config) = webhooks.secret {
+                match secret_config.resolve() {
+                    Ok(v) if v.is_empty() => {
+                        tracing::error!(
+                            "Webhook secret resolves to empty string. Skipping webhook delivery."
+                        );
+                        return;
+                    }
+                    Ok(v) => Some(v),
+                    Err(e) => {
+                        tracing::error!(
+                            "Failed to resolve webhook secret: {}. Skipping webhook delivery.",
+                            e
+                        );
+                        return;
+                    }
                 }
-            });
+            } else {
+                None
+            };
 
             for url in &webhooks.on_content_update {
                 let url = url.clone();
@@ -344,13 +357,20 @@ async fn send_webhook(url: &str, secret: Option<&str>) {
     let body = "{}";
 
     // Compute HMAC signature if secret is configured
-    let signature = secret.and_then(|s| {
-        let mut mac = Hmac::<Sha256>::new_from_slice(s.as_bytes())
-            .map_err(|e| tracing::warn!("Invalid webhook secret key: {}. Sending unsigned.", e))
-            .ok()?;
-        mac.update(body.as_bytes());
-        Some(hex::encode(mac.finalize().into_bytes()))
-    });
+    let signature = match secret {
+        Some(s) => {
+            let mut mac = match Hmac::<Sha256>::new_from_slice(s.as_bytes()) {
+                Ok(m) => m,
+                Err(e) => {
+                    tracing::error!("Invalid webhook secret key: {}. Skipping webhook.", e);
+                    return;
+                }
+            };
+            mac.update(body.as_bytes());
+            Some(hex::encode(mac.finalize().into_bytes()))
+        }
+        None => None,
+    };
 
     for attempt in 0..WEBHOOK_MAX_RETRIES {
         let mut request = client
