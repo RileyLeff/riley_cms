@@ -5,7 +5,7 @@ members = ["crates/riley-core", "crates/riley-api", "crates/riley-cli"]
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.88"
 license = "MIT"
 repository = "https://github.com/rileyleff/riley_cms"
 authors = ["Riley Leff <rileyleff@gmail.com>"]
