@@ -238,7 +238,10 @@ impl Riley {
 
     /// Fire webhooks after content update.
     ///
-    /// Validates webhook URLs against private/internal IP ranges to prevent SSRF.
+    /// Each webhook is validated and sent atomically: DNS is resolved once,
+    /// checked against private/internal IP ranges, and the connection is pinned
+    /// to the validated IP (preventing DNS rebinding/TOCTOU attacks).
+    ///
     /// If a `secret` is configured in `[webhooks]`, signs each request body with
     /// HMAC-SHA256 and includes the hex signature in the `X-Riley-Signature` header.
     /// Retries up to 3 times with exponential backoff on network errors or 5xx responses.
@@ -254,10 +257,6 @@ impl Riley {
             });
 
             for url in &webhooks.on_content_update {
-                if let Err(reason) = validate_webhook_url(url) {
-                    tracing::warn!("Skipping webhook {}: {}", url, reason);
-                    continue;
-                }
                 let url = url.clone();
                 let secret = secret.clone();
                 tokio::spawn(async move {
@@ -271,42 +270,6 @@ impl Riley {
     pub fn config(&self) -> &RileyConfig {
         &self.config
     }
-}
-
-/// Validate a webhook URL to prevent SSRF attacks.
-///
-/// Rejects URLs that resolve to private, loopback, or link-local IP addresses.
-fn validate_webhook_url(url: &str) -> std::result::Result<(), String> {
-    // Parse the URL to extract host and port
-    let parsed = reqwest::Url::parse(url).map_err(|e| format!("invalid URL: {}", e))?;
-
-    let scheme = parsed.scheme();
-    if scheme != "http" && scheme != "https" {
-        return Err(format!("unsupported scheme: {}", scheme));
-    }
-
-    let host = parsed.host_str().ok_or("missing host")?;
-    let port = parsed.port_or_known_default().unwrap_or(443);
-
-    // Resolve the hostname and check all resulting IPs
-    let addr_str = format!("{}:{}", host, port);
-    let addrs: Vec<_> = addr_str
-        .to_socket_addrs()
-        .map_err(|e| format!("DNS resolution failed: {}", e))?
-        .collect();
-
-    if addrs.is_empty() {
-        return Err("hostname did not resolve to any addresses".to_string());
-    }
-
-    for addr in &addrs {
-        let ip = addr.ip();
-        if ip.is_loopback() || ip.is_unspecified() || is_private_ip(&ip) || is_link_local(&ip) {
-            return Err(format!("resolves to private/internal IP: {}", ip));
-        }
-    }
-
-    Ok(())
 }
 
 /// Check if an IP address is in a private range (RFC 1918 / RFC 4193).
@@ -347,14 +310,77 @@ fn is_link_local(ip: &std::net::IpAddr) -> bool {
     }
 }
 
+/// Check if a socket address is safe (not private/loopback/link-local).
+fn is_safe_ip(ip: &std::net::IpAddr) -> bool {
+    !ip.is_loopback() && !ip.is_unspecified() && !is_private_ip(ip) && !is_link_local(ip)
+}
+
 /// Maximum number of retry attempts for webhook delivery.
 const WEBHOOK_MAX_RETRIES: u32 = 3;
 
-/// Send a single webhook with optional HMAC signing and retry with exponential backoff.
+/// Send a single webhook with SSRF protection, optional HMAC signing, and retry.
+///
+/// Resolves DNS once, validates all IPs against private ranges, then pins the
+/// connection to the validated IP using `reqwest::ClientBuilder::resolve()`.
+/// This prevents DNS rebinding (TOCTOU) attacks where DNS changes between
+/// validation and the actual connection.
 ///
 /// Retries on network errors or 5xx responses. Does not retry on 4xx (client errors)
 /// since those indicate a problem with the receiver's configuration, not a transient issue.
 async fn send_webhook(url: &str, secret: Option<&str>) {
+    // 1. Parse URL and validate scheme
+    let parsed = match reqwest::Url::parse(url) {
+        Ok(u) => u,
+        Err(e) => {
+            tracing::warn!("Skipping webhook {}: invalid URL: {}", url, e);
+            return;
+        }
+    };
+
+    let scheme = parsed.scheme();
+    if scheme != "http" && scheme != "https" {
+        tracing::warn!("Skipping webhook {}: unsupported scheme: {}", url, scheme);
+        return;
+    }
+
+    let host = match parsed.host_str() {
+        Some(h) => h.to_string(),
+        None => {
+            tracing::warn!("Skipping webhook {}: missing host", url);
+            return;
+        }
+    };
+    let port = parsed.port_or_known_default().unwrap_or(443);
+
+    // 2. Resolve DNS once and validate all IPs
+    let addr_str = format!("{}:{}", host, port);
+    let addrs: Vec<std::net::SocketAddr> = match addr_str.to_socket_addrs() {
+        Ok(a) => a.collect(),
+        Err(e) => {
+            tracing::warn!("Skipping webhook {}: DNS resolution failed: {}", url, e);
+            return;
+        }
+    };
+
+    // 3. Find a safe (non-private) IP address to connect to
+    let safe_addr = match addrs.into_iter().find(|a| is_safe_ip(&a.ip())) {
+        Some(a) => a,
+        None => {
+            tracing::warn!(
+                "Skipping webhook {}: all resolved IPs are private/internal",
+                url
+            );
+            return;
+        }
+    };
+
+    // 4. Build client pinned to the validated IP (prevents DNS rebinding)
+    let client = reqwest::Client::builder()
+        .resolve(&host, safe_addr)
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+
     let body = "{}";
 
     // Compute HMAC signature if secret is configured
@@ -365,11 +391,6 @@ async fn send_webhook(url: &str, secret: Option<&str>) {
         mac.update(body.as_bytes());
         Some(hex::encode(mac.finalize().into_bytes()))
     });
-
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-        .unwrap_or_else(|_| reqwest::Client::new());
 
     for attempt in 0..WEBHOOK_MAX_RETRIES {
         let mut request = client
@@ -384,7 +405,6 @@ async fn send_webhook(url: &str, secret: Option<&str>) {
         match request.send().await {
             Ok(response) if response.status().is_success() => return,
             Ok(response) if response.status().is_client_error() => {
-                // 4xx: don't retry, receiver has a config problem
                 tracing::warn!(
                     "Webhook {} returned {} (not retrying)",
                     url,
@@ -393,7 +413,6 @@ async fn send_webhook(url: &str, secret: Option<&str>) {
                 return;
             }
             Ok(response) => {
-                // 5xx or other: retry
                 tracing::warn!(
                     "Webhook {} returned {} (attempt {}/{})",
                     url,

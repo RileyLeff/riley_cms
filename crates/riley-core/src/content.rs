@@ -54,7 +54,24 @@ impl ContentCache {
             };
             let path = entry.path();
 
-            if !path.is_dir() {
+            // Security: DirEntry::file_type() does NOT follow symlinks,
+            // preventing symlink traversal attacks (e.g., content.mdx -> /etc/passwd)
+            let file_type = match entry.file_type() {
+                Ok(ft) => ft,
+                Err(e) => {
+                    tracing::warn!("Failed to get file type for {:?}: {}", path, e);
+                    errors += 1;
+                    continue;
+                }
+            };
+            if file_type.is_symlink() {
+                tracing::warn!(
+                    "Security: Skipping symlink in content directory: {:?}",
+                    path
+                );
+                continue;
+            }
+            if !file_type.is_dir() {
                 continue;
             }
 
@@ -125,10 +142,26 @@ impl ContentCache {
         })
     }
 
+    /// Check that a file is not a symlink (prevents traversal attacks).
+    fn reject_symlink(path: &Path) -> Result<()> {
+        let meta = fs::symlink_metadata(path)?;
+        if meta.file_type().is_symlink() {
+            return Err(Error::Content {
+                path: path.to_path_buf(),
+                message: "Symlinks are not allowed in content directories".to_string(),
+            });
+        }
+        Ok(())
+    }
+
     /// Load a single post from a directory
     fn load_post(path: &Path, slug: &str, series_slug: Option<&str>) -> Result<Post> {
         let config_path = path.join("config.toml");
         let content_path = path.join("content.mdx");
+
+        // Security: reject symlinked files to prevent reading arbitrary system files
+        Self::reject_symlink(&config_path)?;
+        Self::reject_symlink(&content_path)?;
 
         let config_str = fs::read_to_string(&config_path)?;
         let config: PostConfig = toml::from_str(&config_str).map_err(|e| Error::Content {
@@ -155,6 +188,7 @@ impl ContentCache {
     /// Load a series and its posts
     fn load_series(path: &Path, slug: &str) -> Result<(SeriesData, Vec<Post>)> {
         let series_toml = path.join("series.toml");
+        Self::reject_symlink(&series_toml)?;
         let series_str = fs::read_to_string(&series_toml)?;
         let config: SeriesConfig = toml::from_str(&series_str).map_err(|e| Error::Content {
             path: series_toml.clone(),
@@ -169,7 +203,16 @@ impl ContentCache {
             let entry = entry?;
             let post_path = entry.path();
 
-            if !post_path.is_dir() {
+            // Security: reject symlinks to prevent traversal attacks
+            let file_type = entry.file_type()?;
+            if file_type.is_symlink() {
+                tracing::warn!(
+                    "Security: Skipping symlink in series directory: {:?}",
+                    post_path
+                );
+                continue;
+            }
+            if !file_type.is_dir() {
                 continue;
             }
 
@@ -793,5 +836,71 @@ preview_text = "Preview"
 
         let result = cache.get_series("nonexistent").unwrap();
         assert!(result.is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_symlink_directory_is_skipped() {
+        use std::os::unix::fs::symlink;
+
+        let temp_dir = TempDir::new().unwrap();
+        let content_dir = temp_dir.path().join("content");
+        fs::create_dir_all(&content_dir).unwrap();
+
+        // Create a real post
+        create_post_files(
+            &content_dir.join("real-post"),
+            "Real Post",
+            "Preview",
+            "# Real content",
+        );
+
+        // Create a symlink directory pointing elsewhere
+        let target_dir = temp_dir.path().join("secret");
+        fs::create_dir_all(&target_dir).unwrap();
+        fs::write(
+            target_dir.join("config.toml"),
+            "title = \"Hacked\"\npreview_text = \"Evil\"",
+        )
+        .unwrap();
+        fs::write(target_dir.join("content.mdx"), "# Secrets here").unwrap();
+
+        symlink(&target_dir, content_dir.join("symlink-post")).unwrap();
+
+        let config = create_content_config(&temp_dir);
+        let cache = ContentCache::load(&config).unwrap();
+
+        // Only the real post should be loaded, symlink is skipped
+        assert_eq!(cache.posts.len(), 1);
+        assert!(cache.posts.contains_key("real-post"));
+        assert!(!cache.posts.contains_key("symlink-post"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_symlinked_content_file_is_rejected() {
+        use std::os::unix::fs::symlink;
+
+        let temp_dir = TempDir::new().unwrap();
+        let content_dir = temp_dir.path().join("content");
+        let post_dir = content_dir.join("evil-post");
+        fs::create_dir_all(&post_dir).unwrap();
+
+        // Real config, but symlinked content file
+        fs::write(
+            post_dir.join("config.toml"),
+            "title = \"Evil\"\npreview_text = \"Preview\"",
+        )
+        .unwrap();
+
+        let secret_file = temp_dir.path().join("secret.txt");
+        fs::write(&secret_file, "SECRET_DATA").unwrap();
+        symlink(&secret_file, post_dir.join("content.mdx")).unwrap();
+
+        let config = create_content_config(&temp_dir);
+        let cache = ContentCache::load(&config).unwrap();
+
+        // Post with symlinked content.mdx should not be loaded
+        assert!(!cache.posts.contains_key("evil-post"));
     }
 }

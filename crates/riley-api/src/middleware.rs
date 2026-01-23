@@ -8,6 +8,7 @@ use axum::{
     middleware::Next,
     response::Response,
 };
+use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use subtle::ConstantTimeEq;
 
@@ -49,12 +50,14 @@ pub async fn auth_middleware(
                     if let Some(auth_header) = request.headers().get(header::AUTHORIZATION) {
                         if let Ok(auth_str) = auth_header.to_str() {
                             if let Some(provided_token) = auth_str.strip_prefix("Bearer ") {
-                                let provided = provided_token.trim().as_bytes();
-                                let expected = expected_token.as_bytes();
-                                // Use constant-time comparison to prevent timing attacks
-                                if provided.len() == expected.len()
-                                    && provided.ct_eq(expected).into()
-                                {
+                                // Hash both tokens before comparing to prevent
+                                // leaking token length via timing side-channel.
+                                // SHA-256 produces fixed 32-byte hashes regardless
+                                // of input length.
+                                let provided_hash =
+                                    Sha256::digest(provided_token.trim().as_bytes());
+                                let expected_hash = Sha256::digest(expected_token.as_bytes());
+                                if provided_hash.ct_eq(&expected_hash).into() {
                                     auth_status = AuthStatus::Admin;
                                 }
                             }
