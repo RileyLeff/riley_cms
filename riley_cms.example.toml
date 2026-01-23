@@ -15,6 +15,10 @@ repo_path = "/data/repo"
 # Directory within the repo where content lives (relative to repo root)
 content_dir = "content"
 
+# Maximum size in bytes for any single content file (config.toml, content.mdx, series.toml)
+# Files exceeding this limit are skipped with a warning. Default: 5MB (5242880)
+# max_content_file_size = 5242880
+
 [storage]
 # Storage backend (currently only "s3" is supported)
 backend = "s3"
@@ -48,12 +52,24 @@ cache_max_age = 60
 # Cache-Control stale-while-revalidate in seconds
 cache_stale_while_revalidate = 300
 
+# [git]
+# Explicit path to git-http-backend binary (auto-discovered if not set)
+# backend_path = "/usr/lib/git-core/git-http-backend"
+# Maximum request body size for git operations in bytes (default: 100MB)
+# max_body_size = 104857600
+# Timeout for git-http-backend CGI process in seconds (default: 300)
+# cgi_timeout_secs = 300
+
 [webhooks]
 # URLs to POST to after successful git push (content update)
 # Use case: trigger frontend rebuild/revalidation
 on_content_update = [
-    "https://mysite.com/api/revalidate?secret=your-secret-here"
+    "https://mysite.com/api/revalidate"
 ]
+
+# HMAC-SHA256 secret for signing webhook payloads (optional)
+# When set, each request includes an X-Riley-Cms-Signature header
+# secret = "env:WEBHOOK_SECRET"
 
 [auth]
 # Authentication tokens

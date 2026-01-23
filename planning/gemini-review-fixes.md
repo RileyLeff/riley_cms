@@ -13,7 +13,7 @@
 ### 1.1 Fix Content Visibility Bypass
 
 **Severity:** Critical
-**Files:** `crates/riley-api/src/handlers.rs`
+**Files:** `crates/riley-cms-api/src/handlers.rs`
 
 The `get_post` and `get_series` handlers do not check if content is a draft or scheduled for the future. Anyone who guesses a slug can view unpublished content.
 
@@ -21,14 +21,14 @@ The `get_post` and `get_series` handlers do not check if content is a draft or s
 Enforce visibility checks in individual resource handlers, not just list endpoints.
 
 ```rust
-// crates/riley-api/src/handlers.rs
+// crates/riley-cms-api/src/handlers.rs
 
 pub async fn get_post(
     State(state): State<Arc<AppState>>,
     Path(slug): Path<String>,
     auth: AuthStatus,
 ) -> Result<impl IntoResponse, ApiError> {
-    let post = state.riley.get_post(&slug)?;
+    let post = state.riley_cms.get_post(&slug)?;
 
     // Visibility Check: drafts/future posts require admin auth
     if let Some(goes_live) = post.metadata.goes_live_at {
@@ -44,7 +44,7 @@ pub async fn get_post(
 ### 1.2 Validate Git Handler Paths
 
 **Severity:** Critical
-**Files:** `crates/riley-api/src/handlers.rs`
+**Files:** `crates/riley-cms-api/src/handlers.rs`
 
 The `git_handler` passes user-supplied path input directly to `PATH_INFO` for `git-http-backend` without strict validation.
 
@@ -75,7 +75,7 @@ pub async fn git_handler(
 ### 1.3 Stream Git Operations (DoS Prevention)
 
 **Severity:** High
-**Files:** `crates/riley-core/src/git.rs`
+**Files:** `crates/riley-cms-core/src/git.rs`
 
 `GitBackend::run_cgi` buffers the entire request body and response into memory. A large push could cause OOM.
 
@@ -83,7 +83,7 @@ pub async fn git_handler(
 Refactor to stream stdin/stdout instead of buffering.
 
 ```rust
-// crates/riley-core/src/git.rs
+// crates/riley-cms-core/src/git.rs
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
@@ -120,7 +120,7 @@ pub async fn run_cgi_streaming(
 ### 1.4 Path Traversal Prevention in Storage
 
 **Severity:** High
-**Files:** `crates/riley-core/src/content.rs` or storage layer
+**Files:** `crates/riley-cms-core/src/content.rs` or storage layer
 
 Ensure all file access is constrained to the content root directory.
 
@@ -152,7 +152,7 @@ fn secure_join(base: &Path, relative: &str) -> Result<PathBuf, CmsError> {
 
 ### 2.1 Differentiate Client vs Server Errors
 
-**Files:** `crates/riley-api/src/handlers.rs`
+**Files:** `crates/riley-cms-api/src/handlers.rs`
 
 The current `internal_error` helper wraps all errors into 500. Map errors to appropriate status codes.
 
@@ -175,7 +175,7 @@ impl IntoResponse for ApiError {
 
 ### 2.2 Replace `.unwrap()` with Proper Error Propagation
 
-**Files:** `crates/riley-api/src/handlers.rs` (header parsing)
+**Files:** `crates/riley-cms-api/src/handlers.rs` (header parsing)
 
 ```rust
 // Before
@@ -195,7 +195,7 @@ headers.insert("X-Custom", value.parse().map_err(|_| ApiError::Internal("header 
 
 ### 3.1 API Route Versioning
 
-**Files:** `crates/riley-api/src/lib.rs` (router setup)
+**Files:** `crates/riley-cms-api/src/lib.rs` (router setup)
 
 Prefix all API routes with `/api/v1`.
 
@@ -216,7 +216,7 @@ fn api_routes() -> Router<Arc<AppState>> {
 
 ### 3.2 Full ETag Hash
 
-**Files:** `crates/riley-core/src/content.rs` (or wherever `compute_etag` is)
+**Files:** `crates/riley-cms-core/src/content.rs` (or wherever `compute_etag` is)
 
 Use the full SHA256 hash instead of truncating to 8 bytes.
 
@@ -242,7 +242,7 @@ fn compute_etag(content: &[u8]) -> String {
 
 ### 4.1 Security Regression Tests
 
-**Files:** `crates/riley-core/tests/security_tests.rs` (new)
+**Files:** `crates/riley-cms-core/tests/security_tests.rs` (new)
 
 ```rust
 #[test]
@@ -262,7 +262,7 @@ fn test_dotdot_in_slug_rejected() {
 
 ### 4.2 Git Handler Integration Tests
 
-**Files:** `crates/riley-api/tests/git_handler.rs` (new)
+**Files:** `crates/riley-cms-api/tests/git_handler.rs` (new)
 
 ```rust
 #[tokio::test]
@@ -289,7 +289,7 @@ async fn test_valid_git_info_refs() {
 
 ### 4.3 Visibility Bypass Tests
 
-**Files:** `crates/riley-api/tests/api.rs` (extend existing)
+**Files:** `crates/riley-cms-api/tests/api.rs` (extend existing)
 
 ```rust
 #[tokio::test]
@@ -319,7 +319,7 @@ async fn test_future_post_not_visible() {
 
 ### 4.4 Concurrency Tests
 
-**Files:** `crates/riley-core/tests/concurrency.rs` (new)
+**Files:** `crates/riley-cms-core/tests/concurrency.rs` (new)
 
 ```rust
 #[tokio::test]
@@ -355,7 +355,7 @@ async fn test_concurrent_reads_during_refresh() {
 
 ### 5.1 Configurable Git Backend Path
 
-**Files:** `crates/riley-core/src/git.rs`, config struct
+**Files:** `crates/riley-cms-core/src/git.rs`, config struct
 
 ```toml
 # config.toml
@@ -380,7 +380,7 @@ impl GitBackend {
 
 ### 5.2 Add `thiserror` Dependency
 
-**Files:** `crates/riley-core/Cargo.toml`
+**Files:** `crates/riley-cms-core/Cargo.toml`
 
 ```toml
 [dependencies]

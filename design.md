@@ -66,7 +66,8 @@ cache_stale_while_revalidate = 300      # stale-while-revalidate in seconds
 
 [webhooks]
 # Called after successful git push (content update)
-on_content_update = ["https://mysite.com/api/revalidate?secret=xxx"]
+on_content_update = ["https://mysite.com/api/revalidate"]
+secret = "env:WEBHOOK_SECRET"  # HMAC-SHA256 signing (X-Riley-Cms-Signature header)
 
 [auth]
 # Values can be literals or "env:VAR_NAME" to read from environment
@@ -172,9 +173,9 @@ GET  /assets                    # list assets in bucket
 GET  /health                    # healthcheck
 
 # Git smart HTTP protocol
-POST /git/content/git-receive-pack
-POST /git/content/git-upload-pack
-GET  /git/content/info/refs
+POST /git/git-receive-pack
+POST /git/git-upload-pack
+GET  /git/info/refs
 ```
 
 Query params:
@@ -247,10 +248,10 @@ HTTP caching:
 
 The service hosts the git repo itself via git-over-HTTP (smart protocol). No GitHub dependency.
 
-- Push: `git push https://cms.mydomain.com/git/content main`
-- Clone: `git clone https://cms.mydomain.com/git/content` (if you want, can disable public clone)
+- Push: `git push https://cms.mydomain.com/git main`
+- Clone: `git clone https://cms.mydomain.com/git` (if you want, can disable public clone)
 - Auth via bearer token or basic auth (username ignored, password = token)
-- Implementation: use `git2` or `gix` crate (prefer library over shelling out to `git http-backend`)
+- Implementation: invokes `git http-backend` CGI with streaming I/O
 - Repo lives on a persistent volume at the configured `repo_path`
 - On successful push: refresh content cache, then fire webhooks (async, non-blocking)
 
@@ -378,8 +379,13 @@ Clap CLI. Thin layer over `riley-cms-core`.
 - `tokio` — async runtime
 - `tracing`, `tracing-subscriber` — logging
 - `thiserror` — error types
-- `git-http-backend` — git operations via CGI
+- `tokio-util`, `futures-util`, `bytes` — streaming I/O for git CGI
 - `tower-http` — middleware (CORS, tracing, etc)
+- `reqwest` — webhook delivery
+- `sha2`, `hmac`, `hex` — ETag hashing & webhook HMAC signing
+
+System requirements:
+- `git` with `git-http-backend` — serves git repos over HTTP via CGI
 
 Maybe:
 - `notify` — for watching content changes (future)
@@ -431,7 +437,7 @@ Since this is meant to be published:
 
 5. **CORS**: Built-in config via `cors_origins` in server section.
 
-6. **Git implementation**: Use `git2` or `gix` crate rather than shelling out to `git http-backend`.
+6. **Git implementation**: Invoke `git http-backend` CGI with streaming I/O. Simpler than embedding `git2`/`gix`, and inherits git's own protocol handling.
 
 7. **MDX handling**: Serve raw MDX. Frontend is responsible for parsing/rendering.
 

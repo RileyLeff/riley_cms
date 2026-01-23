@@ -17,7 +17,7 @@ This document outlines the plan to address architecture, security, and feature g
 ### 1.1 Fix Async Blocking I/O
 **Priority**: Critical
 **Complexity**: Moderate
-**Location**: `crates/riley-core/src/lib.rs`
+**Location**: `crates/riley-cms-core/src/lib.rs`
 
 *   **Issue**: `ContentCache::load` performs synchronous filesystem I/O. Calling this directly in `Riley::refresh` (an async function) blocks the Tokio thread, potentially stalling the server.
 *   **Changes**:
@@ -30,7 +30,7 @@ This document outlines the plan to address architecture, security, and feature g
 ### 1.2 Implement Authentication Middleware
 **Priority**: Critical
 **Complexity**: Moderate
-**Location**: `crates/riley-api/src/middleware.rs`, `crates/riley-api/src/lib.rs`, `crates/riley-api/src/handlers.rs`
+**Location**: `crates/riley-cms-api/src/middleware.rs`, `crates/riley-cms-api/src/lib.rs`, `crates/riley-cms-api/src/handlers.rs`
 
 *   **Issue**: Drafts and scheduled posts are currently accessible by anyone simply by adding `?include_drafts=true`. `AuthConfig` is defined but unused.
 *   **Changes**:
@@ -53,7 +53,7 @@ This document outlines the plan to address architecture, security, and feature g
 ### 2.1 API Integration Tests
 **Priority**: High
 **Complexity**: Moderate
-**Location**: `crates/riley-api/tests/api.rs` (New File)
+**Location**: `crates/riley-cms-api/tests/api.rs` (New File)
 
 *   **Issue**: No tests for the HTTP layer.
 *   **Changes**:
@@ -76,7 +76,7 @@ This document outlines the plan to address architecture, security, and feature g
 ### 3.1 Core Git Operations
 **Priority**: High
 **Complexity**: Complex
-**Location**: `crates/riley-core/src/git.rs` (New File), `crates/riley-core/src/lib.rs`
+**Location**: `crates/riley-cms-core/src/git.rs` (New File), `crates/riley-cms-core/src/lib.rs`
 
 *   **Issue**: Design docs claim Git server support, but it is missing.
 *   **Changes**:
@@ -88,7 +88,7 @@ This document outlines the plan to address architecture, security, and feature g
 ### 3.2 Git HTTP API Endpoints
 **Priority**: High
 **Complexity**: Moderate
-**Location**: `crates/riley-api/src/handlers.rs`, `crates/riley-api/src/lib.rs`
+**Location**: `crates/riley-cms-api/src/handlers.rs`, `crates/riley-cms-api/src/lib.rs`
 
 *   **Issue**: Endpoints defined in design (`/git/*`) are missing.
 *   **Changes**:
@@ -112,7 +112,7 @@ This document outlines the plan to address architecture, security, and feature g
 ### 4.1 Safe Header Parsing
 **Priority**: Low
 **Complexity**: Simple
-**Location**: `crates/riley-api/src/handlers.rs`
+**Location**: `crates/riley-cms-api/src/handlers.rs`
 
 *   **Issue**: `unwrap()` used on `header.parse()`.
 *   **Changes**:

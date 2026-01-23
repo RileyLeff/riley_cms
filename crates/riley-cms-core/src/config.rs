@@ -20,6 +20,20 @@ pub struct RileyCmsConfig {
 pub struct GitConfig {
     /// Explicit path to git-http-backend binary (optional, auto-discovered if not set)
     pub backend_path: Option<PathBuf>,
+    /// Maximum request body size for git operations in bytes. Default: 100MB.
+    #[serde(default = "default_git_max_body_size")]
+    pub max_body_size: u64,
+    /// Timeout for git-http-backend CGI process in seconds. Default: 300 (5 minutes).
+    #[serde(default = "default_git_cgi_timeout_secs")]
+    pub cgi_timeout_secs: u64,
+}
+
+fn default_git_max_body_size() -> u64 {
+    100 * 1024 * 1024 // 100 MB
+}
+
+fn default_git_cgi_timeout_secs() -> u64 {
+    300 // 5 minutes
 }
 
 /// Content repository configuration
@@ -28,10 +42,18 @@ pub struct ContentConfig {
     pub repo_path: PathBuf,
     #[serde(default = "default_content_dir")]
     pub content_dir: String,
+    /// Maximum size in bytes for any single content file (config.toml, content.mdx, series.toml).
+    /// Files exceeding this limit are skipped with a warning. Default: 5MB.
+    #[serde(default = "default_max_content_file_size")]
+    pub max_content_file_size: u64,
 }
 
 fn default_content_dir() -> String {
     "content".to_string()
+}
+
+fn default_max_content_file_size() -> u64 {
+    5 * 1024 * 1024 // 5 MB
 }
 
 /// Storage backend configuration

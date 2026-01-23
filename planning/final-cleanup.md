@@ -9,7 +9,7 @@ Prioritized by real-world impact for public internet deployment and crates.io pu
 
 ### 1.1 Sanitize error messages exposed to HTTP clients
 
-**Files:** `crates/riley-api/src/handlers.rs`
+**Files:** `crates/riley-cms-api/src/handlers.rs`
 
 **Problem:** Internal error details (git backend messages, S3 SDK errors, filesystem paths) are returned verbatim to clients via `internal_error()` and inline error responses. An attacker probing endpoints can learn infrastructure details.
 
@@ -23,7 +23,7 @@ Prioritized by real-world impact for public internet deployment and crates.io pu
 
 ### 1.2 Fix CGI response panic
 
-**File:** `crates/riley-api/src/handlers.rs:524-526`
+**File:** `crates/riley-cms-api/src/handlers.rs:524-526`
 
 **Problem:**
 ```rust
@@ -45,7 +45,7 @@ If `git-http-backend` returns malformed headers, this panics and crashes the ser
 
 ### 1.3 Webhook SSRF protection
 
-**File:** `crates/riley-core/src/lib.rs` (`fire_webhooks`)
+**File:** `crates/riley-cms-core/src/lib.rs` (`fire_webhooks`)
 
 **Problem:** Webhook URLs are POSTed to without validation. A misconfigured or malicious URL could hit internal services (AWS metadata, localhost databases, etc.).
 
@@ -57,7 +57,7 @@ If `git-http-backend` returns malformed headers, this panics and crashes the ser
 
 ### 1.4 Secure CORS defaults
 
-**File:** `crates/riley-api/src/lib.rs:51-66`
+**File:** `crates/riley-cms-api/src/lib.rs:51-66`
 
 **Problem:** When `cors_origins` is omitted from config, CORS defaults to `Any` (allow all origins). Users who forget to configure CORS get a wide-open deployment.
 
@@ -71,7 +71,7 @@ Document that users must explicitly set `cors_origins = ["*"]` or specific origi
 
 ### 1.5 Constant-time token comparison
 
-**Files:** `crates/riley-api/src/middleware.rs:50`, `crates/riley-api/src/handlers.rs` (git basic auth)
+**Files:** `crates/riley-cms-api/src/middleware.rs:50`, `crates/riley-cms-api/src/handlers.rs` (git basic auth)
 
 **Problem:** Token comparison uses `==`, which is theoretically vulnerable to timing attacks. While not practically exploitable over a network, security scanners will flag it and it's a one-line fix.
 
@@ -89,7 +89,7 @@ if provided_token.as_bytes().ct_eq(expected_token.as_bytes()).into() {
 
 ### 2.1 Content loading resilience
 
-**File:** `crates/riley-core/src/content.rs` (`ContentCache::load`)
+**File:** `crates/riley-cms-core/src/content.rs` (`ContentCache::load`)
 
 **Problem:** A single malformed `config.toml` or unreadable file prevents the entire cache from loading. The server won't start or refresh.
 
@@ -106,7 +106,7 @@ Same pattern for `load_series`. Consider adding a startup log summary: "Loaded X
 
 ### 2.2 Cap pagination limit
 
-**File:** `crates/riley-core/src/content.rs` (or `crates/riley-api/src/handlers.rs`)
+**File:** `crates/riley-cms-core/src/content.rs` (or `crates/riley-cms-api/src/handlers.rs`)
 
 **Problem:** `limit` query param accepts any `usize` value with no upper bound.
 
@@ -119,7 +119,7 @@ let limit = opts.limit.unwrap_or(50).min(500);
 
 ### 2.3 Warn on token resolution failure
 
-**File:** `crates/riley-api/src/middleware.rs:45`
+**File:** `crates/riley-cms-api/src/middleware.rs:45`
 
 **Problem:** If the env var holding the API token is unset, `token_config.resolve()` returns `Err` and auth silently degrades to public-only with no indication.
 
@@ -139,7 +139,7 @@ match token_config.resolve() {
 
 ### 3.1 Remove unused `git2` dependency
 
-**Files:** `Cargo.toml`, `crates/riley-core/Cargo.toml`, `crates/riley-core/src/error.rs`
+**Files:** `Cargo.toml`, `crates/riley-cms-core/Cargo.toml`, `crates/riley-cms-core/src/error.rs`
 
 **Problem:** `git2` is declared as a dependency and has a `From<git2::Error>` impl, but no runtime code uses it. It adds ~30s to clean compile time.
 
@@ -166,7 +166,7 @@ audit:
 
 ### 3.3 S3 connectivity check at startup
 
-**File:** `crates/riley-core/src/storage.rs`
+**File:** `crates/riley-cms-core/src/storage.rs`
 
 **Problem:** S3 misconfig is only discovered on the first API call, not at startup.
 

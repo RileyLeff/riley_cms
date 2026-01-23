@@ -6,7 +6,7 @@ Detailed implementation guidance for the two Critical priority tasks from the re
 
 ## 1. Fix Async Blocking I/O (Task 1.1)
 
-**Location:** `crates/riley-core/src/lib.rs`
+**Location:** `crates/riley-cms-core/src/lib.rs`
 
 ### Overview
 Offload the synchronous `ContentCache::load` operation to a dedicated blocking thread pool provided by Tokio. This prevents the heavy filesystem operations from stalling the async executor.
@@ -20,7 +20,7 @@ Offload the synchronous `ContentCache::load` operation to a dedicated blocking t
 ### Implementation Reference
 
 ```rust
-// crates/riley-core/src/lib.rs
+// crates/riley-cms-core/src/lib.rs
 
 impl Riley {
     /// Create a new Riley instance from configuration.
@@ -74,15 +74,15 @@ impl Riley {
 ## 2. Auth Middleware (Task 1.2)
 
 **Locations:**
-- `crates/riley-api/src/middleware.rs` (Implementation)
-- `crates/riley-api/src/lib.rs` (Registration)
-- `crates/riley-api/src/handlers.rs` (Usage)
+- `crates/riley-cms-api/src/middleware.rs` (Implementation)
+- `crates/riley-cms-api/src/lib.rs` (Registration)
+- `crates/riley-cms-api/src/handlers.rs` (Usage)
 
 ### Step A: Middleware Implementation
 
 Use `axum::middleware::from_fn_with_state` for a concise implementation that has access to the app configuration.
 
-**`crates/riley-api/src/middleware.rs`**:
+**`crates/riley-cms-api/src/middleware.rs`**:
 
 ```rust
 use axum::{
@@ -139,7 +139,7 @@ pub async fn auth_middleware(
 
 Update the router builder to include the middleware.
 
-**`crates/riley-api/src/lib.rs`**:
+**`crates/riley-cms-api/src/lib.rs`**:
 
 ```rust
 // Add imports
@@ -164,7 +164,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
 
 Modify `list_posts` and `list_series` to verify permissions.
 
-**`crates/riley-api/src/handlers.rs`**:
+**`crates/riley-cms-api/src/handlers.rs`**:
 
 ```rust
 // Add imports

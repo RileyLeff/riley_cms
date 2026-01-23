@@ -87,7 +87,7 @@ impl ContentCache {
             // Check if this is a series (has series.toml)
             let series_toml = path.join("series.toml");
             if series_toml.exists() {
-                match Self::load_series(&path, &slug) {
+                match Self::load_series(&path, &slug, config.max_content_file_size) {
                     Ok((series_data, series_posts)) => {
                         series.insert(slug.clone(), series_data);
                         for post in series_posts {
@@ -105,7 +105,7 @@ impl ContentCache {
                 let content_mdx = path.join("content.mdx");
 
                 if config_toml.exists() && content_mdx.exists() {
-                    match Self::load_post(&path, &slug, None) {
+                    match Self::load_post(&path, &slug, None, config.max_content_file_size) {
                         Ok(post) => {
                             posts.insert(slug, post);
                         }
@@ -142,6 +142,22 @@ impl ContentCache {
         })
     }
 
+    /// Read a file to string, rejecting files larger than max_size.
+    fn read_file_bounded(path: &Path, max_size: u64) -> Result<String> {
+        let meta = fs::metadata(path)?;
+        if meta.len() > max_size {
+            return Err(Error::Content {
+                path: path.to_path_buf(),
+                message: format!(
+                    "File size {} bytes exceeds limit of {} bytes",
+                    meta.len(),
+                    max_size
+                ),
+            });
+        }
+        Ok(fs::read_to_string(path)?)
+    }
+
     /// Check that a file is not a symlink (prevents traversal attacks).
     fn reject_symlink(path: &Path) -> Result<()> {
         let meta = fs::symlink_metadata(path)?;
@@ -155,7 +171,12 @@ impl ContentCache {
     }
 
     /// Load a single post from a directory
-    fn load_post(path: &Path, slug: &str, series_slug: Option<&str>) -> Result<Post> {
+    fn load_post(
+        path: &Path,
+        slug: &str,
+        series_slug: Option<&str>,
+        max_file_size: u64,
+    ) -> Result<Post> {
         let config_path = path.join("config.toml");
         let content_path = path.join("content.mdx");
 
@@ -163,13 +184,13 @@ impl ContentCache {
         Self::reject_symlink(&config_path)?;
         Self::reject_symlink(&content_path)?;
 
-        let config_str = fs::read_to_string(&config_path)?;
+        let config_str = Self::read_file_bounded(&config_path, max_file_size)?;
         let config: PostConfig = toml::from_str(&config_str).map_err(|e| Error::Content {
             path: config_path.clone(),
             message: e.to_string(),
         })?;
 
-        let content = fs::read_to_string(&content_path)?;
+        let content = Self::read_file_bounded(&content_path, max_file_size)?;
 
         Ok(Post {
             slug: slug.to_string(),
@@ -186,10 +207,10 @@ impl ContentCache {
     }
 
     /// Load a series and its posts
-    fn load_series(path: &Path, slug: &str) -> Result<(SeriesData, Vec<Post>)> {
+    fn load_series(path: &Path, slug: &str, max_file_size: u64) -> Result<(SeriesData, Vec<Post>)> {
         let series_toml = path.join("series.toml");
         Self::reject_symlink(&series_toml)?;
-        let series_str = fs::read_to_string(&series_toml)?;
+        let series_str = Self::read_file_bounded(&series_toml, max_file_size)?;
         let config: SeriesConfig = toml::from_str(&series_str).map_err(|e| Error::Content {
             path: series_toml.clone(),
             message: e.to_string(),
@@ -229,7 +250,7 @@ impl ContentCache {
             let content_mdx = post_path.join("content.mdx");
 
             if config_toml.exists() && content_mdx.exists() {
-                let post = Self::load_post(&post_path, &post_slug, Some(slug))?;
+                let post = Self::load_post(&post_path, &post_slug, Some(slug), max_file_size)?;
                 post_slugs.push(post_slug);
                 posts.push(post);
             }
@@ -480,6 +501,7 @@ mod tests {
         ContentConfig {
             repo_path: temp_dir.path().to_path_buf(),
             content_dir: "content".to_string(),
+            max_content_file_size: 5 * 1024 * 1024,
         }
     }
 

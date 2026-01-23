@@ -53,7 +53,13 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         // State and other middleware
         .with_state(state)
         .layer(cors)
-        .layer(TraceLayer::new_for_http())
+        .layer(
+            TraceLayer::new_for_http().make_span_with(
+                tower_http::trace::DefaultMakeSpan::new()
+                    .level(tracing::Level::INFO)
+                    .include_headers(false),
+            ),
+        )
 }
 
 /// Build CORS layer from config.

@@ -26,10 +26,10 @@ Fix the two remaining issues from the Gemini security review:
 | File | Changes |
 |------|---------|
 | `Cargo.toml` (workspace) | Add `tokio-util = { version = "0.7", features = ["io"] }`, `futures-util = "0.3"` |
-| `crates/riley-core/Cargo.toml` | Add `tokio-util`, `futures-util`, `bytes` deps |
-| `crates/riley-api/Cargo.toml` | Add `tokio-util`, `futures-util` deps |
-| `crates/riley-core/src/git.rs` | New types + rewrite `run_cgi` to streaming |
-| `crates/riley-api/src/handlers.rs` | Rewrite `git_handler` to use streaming |
+| `crates/riley-cms-core/Cargo.toml` | Add `tokio-util`, `futures-util`, `bytes` deps |
+| `crates/riley-cms-api/Cargo.toml` | Add `tokio-util`, `futures-util` deps |
+| `crates/riley-cms-core/src/git.rs` | New types + rewrite `run_cgi` to streaming |
+| `crates/riley-cms-api/src/handlers.rs` | Rewrite `git_handler` to use streaming |
 
 ### New types in `git.rs`
 
@@ -108,8 +108,8 @@ let response_body = Body::from_stream(cgi_response.body_stream);
 tokio::spawn(async move {
     if let Ok((exit_status, _)) = cgi_response.completion.wait().await {
         if is_write_operation && exit_status.success() {
-            state_clone.riley.refresh().await.ok();
-            state_clone.riley.fire_webhooks().await;
+            state_clone.riley_cms.refresh().await.ok();
+            state_clone.riley_cms.fire_webhooks().await;
         }
     }
 });
@@ -139,7 +139,7 @@ The existing `parse_cgi_response` function and `GitCgiResponse` struct stay as i
 ## Fix 2: Replace `unsafe { env::set_var }` (Low)
 
 ### Problem
-`crates/riley-core/src/config.rs:231,236` — uses `unsafe { std::env::set_var(...) }` and `unsafe { std::env::remove_var(...) }` in test code. This is unsound when tests run in parallel (the default).
+`crates/riley-cms-core/src/config.rs:231,236` — uses `unsafe { std::env::set_var(...) }` and `unsafe { std::env::remove_var(...) }` in test code. This is unsound when tests run in parallel (the default).
 
 ### Approach
 Add `temp-env` as a dev-dependency and use its scoped API.
@@ -148,8 +148,8 @@ Add `temp-env` as a dev-dependency and use its scoped API.
 
 | File | Changes |
 |------|---------|
-| `crates/riley-core/Cargo.toml` | Add `temp-env = "0.3"` to `[dev-dependencies]` |
-| `crates/riley-core/src/config.rs` | Rewrite `test_config_value_env` test |
+| `crates/riley-cms-core/Cargo.toml` | Add `temp-env = "0.3"` to `[dev-dependencies]` |
+| `crates/riley-cms-core/src/config.rs` | Rewrite `test_config_value_env` test |
 
 ### Before
 ```rust
@@ -177,7 +177,7 @@ fn test_config_value_env() {
 
 ## Dependency Summary
 
-| Crate | Workspace | riley-core | riley-api |
+| Crate | Workspace | riley-cms-core | riley-cms-api |
 |-------|-----------|------------|-----------|
 | `tokio-util` (0.7, features=["io"]) | add | add | add |
 | `futures-util` (0.3) | add | add | add |

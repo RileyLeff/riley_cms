@@ -413,8 +413,8 @@ fn check_git_basic_auth(headers: &HeaderMap, state: &AppState) -> bool {
     }
 }
 
-/// Maximum allowed body size for git operations (100 MB)
-const GIT_MAX_BODY_SIZE: usize = 100 * 1024 * 1024;
+/// Default maximum allowed body size for git operations (100 MB)
+const DEFAULT_GIT_MAX_BODY_SIZE: u64 = 100 * 1024 * 1024;
 
 /// Validate that a git path is safe (no traversal, no injection)
 fn is_valid_git_path(path: &str) -> bool {
@@ -463,13 +463,15 @@ pub async fn git_handler(
             .into_response();
     }
 
-    // Get the content repository path and optional git backend path
+    // Get the content repository path and git config
     let repo_path = &state.config.content.repo_path;
-    let backend_path = state
-        .config
-        .git
-        .as_ref()
-        .and_then(|g| g.backend_path.clone());
+    let git_config = state.config.git.as_ref();
+    let backend_path = git_config.and_then(|g| g.backend_path.clone());
+    let max_body_size = git_config
+        .map(|g| g.max_body_size)
+        .unwrap_or(DEFAULT_GIT_MAX_BODY_SIZE);
+    let cgi_timeout =
+        std::time::Duration::from_secs(git_config.map(|g| g.cgi_timeout_secs).unwrap_or(300));
     let backend = GitBackend::with_backend_path(repo_path, backend_path);
 
     // Check if repo exists
@@ -518,7 +520,7 @@ pub async fn git_handler(
             content_type.as_deref(),
             content_length,
             body_stream,
-            GIT_MAX_BODY_SIZE as u64,
+            max_body_size,
         )
         .await
     {
@@ -558,7 +560,7 @@ pub async fn git_handler(
             // Only trigger refresh/webhooks for successful write operations.
             let state_clone = state.clone();
             tokio::spawn(async move {
-                match cgi_response.completion.wait().await {
+                match cgi_response.completion.wait(cgi_timeout).await {
                     Ok(exit_status) => {
                         if is_write_operation && exit_status.success() {
                             if let Err(e) = state_clone.riley_cms.refresh().await {

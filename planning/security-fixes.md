@@ -10,7 +10,7 @@ Fix all 5 security/production issues identified in the Gemini code review, order
 
 **Problem:** `fs::read_dir` entries checked with `path.is_dir()` follow symlinks. A malicious git committer could create a symlink `content.mdx -> /etc/passwd` and expose arbitrary files via the API.
 
-**Files:** `crates/riley-core/src/content.rs`
+**Files:** `crates/riley-cms-core/src/content.rs`
 
 **Approach:** Use `entry.file_type()` (which does NOT follow symlinks on the DirEntry) to detect and skip symlinks with a warning. Apply in two locations:
 1. `ContentCache::load()` loop (line ~46)
@@ -47,7 +47,7 @@ fn is_safe_file(path: &Path) -> bool {
 
 **Problem:** `validate_webhook_url()` resolves DNS and checks IPs, but `send_webhook()` passes the original URL to reqwest which resolves again. DNS could change between checks.
 
-**Files:** `crates/riley-core/src/lib.rs`
+**Files:** `crates/riley-cms-core/src/lib.rs`
 
 **Approach:** Merge validation into `send_webhook()`. Resolve DNS once, validate all IPs, then use `reqwest::ClientBuilder::resolve(host, validated_addr)` to pin the connection to the validated IP. Remove the separate `validate_webhook_url()` call from `fire_webhooks()`.
 
@@ -71,8 +71,8 @@ Keep `is_private_ip()`, `is_link_local()` as private helpers but restructure so 
 
 **Files:**
 - `Cargo.toml` (workspace)
-- `crates/riley-api/Cargo.toml`
-- `crates/riley-api/src/lib.rs`
+- `crates/riley-cms-api/Cargo.toml`
+- `crates/riley-cms-api/src/lib.rs`
 
 **Approach:** Use `tower-governor` 0.8.0 (compatible with tower 0.5 + axum 0.8). Apply per-IP rate limiting as a layer on the router.
 
@@ -93,7 +93,7 @@ let governor_conf = GovernorConfigBuilder::default()
 
 **Dependencies:**
 - Workspace: `tower-governor = "0.8"`
-- riley-api: `tower-governor = { workspace = true }`
+- riley-cms-api: `tower-governor = { workspace = true }`
 
 **Tests:** Verify the server still starts and responds. Rate limit testing is best done manually with a load tool.
 
@@ -103,7 +103,7 @@ let governor_conf = GovernorConfigBuilder::default()
 
 **Problem:** `axum::serve(listener, app).await` has no signal handler. Process kills sever in-flight requests.
 
-**Files:** `crates/riley-api/src/lib.rs`
+**Files:** `crates/riley-cms-api/src/lib.rs`
 
 **Approach:** Add `with_graceful_shutdown(shutdown_signal())` to the serve call. The signal handler listens for SIGINT (Ctrl+C) and SIGTERM (Docker/K8s stop).
 
@@ -143,8 +143,8 @@ async fn shutdown_signal() {
 **Problem:** `provided.len() == expected.len()` check before `ct_eq` leaks token length via timing.
 
 **Files:**
-- `crates/riley-api/src/middleware.rs`
-- `crates/riley-api/Cargo.toml`
+- `crates/riley-cms-api/src/middleware.rs`
+- `crates/riley-cms-api/Cargo.toml`
 
 **Approach:** Hash both tokens with SHA-256 before comparing. Hashes are always 32 bytes, so length is never leaked. This is the standard approach (used by Django, Rails, etc.).
 
@@ -162,7 +162,7 @@ Remove the `provided.len() == expected.len()` check entirely.
 
 **Dependencies:**
 - Workspace: `sha2` already present
-- riley-api: add `sha2 = { workspace = true }`
+- riley-cms-api: add `sha2 = { workspace = true }`
 
 **Tests:** Existing auth tests verify correct behavior. Add test that wrong-length token still fails.
 
@@ -170,7 +170,7 @@ Remove the `provided.len() == expected.len()` check entirely.
 
 ## Dependency Summary
 
-| Crate | Add to workspace | Add to riley-api | Add to riley-core |
+| Crate | Add to workspace | Add to riley-cms-api | Add to riley-cms-core |
 |-------|-----------------|-----------------|-------------------|
 | tower-governor | `"0.8"` | yes | no |
 | sha2 | already there | yes (new) | already there |

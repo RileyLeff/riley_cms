@@ -20,8 +20,8 @@ use tokio::process::{Child, Command};
 use tokio::task::JoinHandle;
 use tokio::time::{Duration, timeout};
 
-/// Maximum time to wait for a git-http-backend process to complete.
-const GIT_CGI_TIMEOUT: Duration = Duration::from_secs(300); // 5 minutes
+/// Default maximum time to wait for a git-http-backend process to complete.
+pub const DEFAULT_GIT_CGI_TIMEOUT: Duration = Duration::from_secs(300); // 5 minutes
 use tokio_util::io::ReaderStream;
 
 /// Maximum size of CGI headers before we give up (16 KB)
@@ -68,7 +68,8 @@ impl GitCgiCompletion {
     /// Wait for the process to exit. Returns the exit status.
     ///
     /// Also joins the stdin streaming task and logs stderr output.
-    pub async fn wait(mut self) -> Result<std::process::ExitStatus> {
+    /// The `cgi_timeout` parameter controls how long to wait before killing the process.
+    pub async fn wait(mut self, cgi_timeout: Duration) -> Result<std::process::ExitStatus> {
         // Wait for stdin to finish (if still running)
         if let Some(stdin_task) = self.stdin_task.take() {
             match stdin_task.await {
@@ -80,13 +81,13 @@ impl GitCgiCompletion {
             }
         }
 
-        let status = match timeout(GIT_CGI_TIMEOUT, self.child.wait()).await {
+        let status = match timeout(cgi_timeout, self.child.wait()).await {
             Ok(result) => result
                 .map_err(|e| Error::Git(format!("Failed to wait on git-http-backend: {}", e)))?,
             Err(_elapsed) => {
                 tracing::error!(
                     "Git CGI process timed out after {}s, killing",
-                    GIT_CGI_TIMEOUT.as_secs()
+                    cgi_timeout.as_secs()
                 );
                 let _ = self.child.kill().await;
                 return Err(Error::Git("Git operation timed out".to_string()));

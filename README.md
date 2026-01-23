@@ -173,7 +173,7 @@ api_token = "your-literal-token"
 For pushing content via Git over HTTP:
 
 ```bash
-git remote add origin http://git:your-token@localhost:8080/git/content
+git remote add origin http://git:your-token@localhost:8080/git
 git push origin main
 ```
 
@@ -196,7 +196,7 @@ riley_cms can serve your content repository over HTTP, allowing you to push cont
 
 ```bash
 # On your local machine
-git remote add cms http://git:your-token@your-server:8080/git/content
+git remote add cms http://git:your-token@your-server:8080/git
 git push cms main
 ```
 
@@ -277,14 +277,15 @@ async fn main() -> anyhow::Result<()> {
 ### Docker
 
 ```dockerfile
-FROM rust:1.85 AS builder
+FROM rust:1.88 AS builder
 WORKDIR /app
 COPY . .
 RUN cargo build --release
 
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y git ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /app/target/release/riley_cms /usr/local/bin/
+VOLUME /data
 EXPOSE 8080
 CMD ["riley_cms", "serve"]
 ```
@@ -296,13 +297,19 @@ services:
   riley_cms:
     build: .
     volumes:
-      - ./content:/data/content:ro
+      - riley_cms_data:/data
       - ./riley_cms.toml:/etc/riley_cms/config.toml:ro
     environment:
+      - GIT_AUTH_TOKEN=${GIT_AUTH_TOKEN}
+      - API_TOKEN=${API_TOKEN}
       - AWS_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}
     ports:
       - "8080:8080"
+    restart: unless-stopped
+
+volumes:
+  riley_cms_data:
 ```
 
 ## Configuration
