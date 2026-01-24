@@ -62,6 +62,6 @@ mime_guess = "2.0"
 subtle = "2.6"
 
 # Workspace crates
-riley-cms-core = { path = "crates/riley-cms-core" }
-riley-cms-api = { path = "crates/riley-cms-api" }
-riley-cms-cli = { path = "crates/riley-cms-cli" }
+riley-cms-core = { path = "crates/riley-cms-core", version = "0.1.0" }
+riley-cms-api = { path = "crates/riley-cms-api", version = "0.1.0" }
+riley-cms-cli = { path = "crates/riley-cms-cli", version = "0.1.0" }
