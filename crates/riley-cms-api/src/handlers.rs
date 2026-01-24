@@ -595,7 +595,13 @@ pub async fn git_handler(
                             // refreshing the content cache.
                             let repo_path = &state_clone.config.content.repo_path;
                             match tokio::process::Command::new("git")
-                                .args(["-C", &repo_path.to_string_lossy(), "checkout", "-f", "HEAD"])
+                                .args([
+                                    "-C",
+                                    &repo_path.to_string_lossy(),
+                                    "checkout",
+                                    "-f",
+                                    "HEAD",
+                                ])
                                 .output()
                                 .await
                             {
@@ -606,10 +612,7 @@ pub async fn git_handler(
                                     );
                                 }
                                 Err(e) => {
-                                    tracing::error!(
-                                        "Failed to run git checkout after push: {}",
-                                        e
-                                    );
+                                    tracing::error!("Failed to run git checkout after push: {}", e);
                                 }
                                 _ => {}
                             }
