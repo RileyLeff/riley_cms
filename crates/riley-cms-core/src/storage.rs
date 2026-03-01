@@ -30,7 +30,12 @@ impl Storage {
             aws_config_builder.region(aws_config::Region::new(resolved.region.clone()));
 
         let aws_config = aws_config_builder.load().await;
-        let client = Client::new(&aws_config);
+
+        // Use path-style addressing for S3-compatible providers like Cloudflare R2
+        let s3_config = aws_sdk_s3::config::Builder::from(&aws_config)
+            .force_path_style(true)
+            .build();
+        let client = Client::from_conf(s3_config);
 
         let storage = Self {
             client,
