@@ -41,7 +41,11 @@ impl KeyExtractor for RileyCmsKeyExtractor {
 
     fn extract<T>(&self, req: &axum::http::Request<T>) -> Result<Self::Key, GovernorError> {
         if self.behind_proxy {
-            SmartIpKeyExtractor.extract(req)
+            // Try proxy headers first, fall back to peer IP for internal
+            // container-to-container calls that bypass the reverse proxy.
+            SmartIpKeyExtractor
+                .extract(req)
+                .or_else(|_| PeerIpKeyExtractor.extract(req))
         } else {
             PeerIpKeyExtractor.extract(req)
         }
