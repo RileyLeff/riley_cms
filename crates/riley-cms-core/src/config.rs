@@ -70,11 +70,34 @@ fn default_max_total_content_size() -> u64 {
 pub struct StorageConfig {
     #[serde(default = "default_backend")]
     pub backend: String,
-    pub bucket: String,
+    pub bucket: ConfigValue,
     #[serde(default = "default_region")]
+    pub region: String,
+    pub endpoint: Option<ConfigValue>,
+    pub public_url_base: ConfigValue,
+}
+
+/// Resolved storage config with all env vars expanded
+#[derive(Debug, Clone)]
+pub struct ResolvedStorageConfig {
+    pub backend: String,
+    pub bucket: String,
     pub region: String,
     pub endpoint: Option<String>,
     pub public_url_base: String,
+}
+
+impl StorageConfig {
+    /// Resolve all env: references in storage config
+    pub fn resolve(&self) -> Result<ResolvedStorageConfig> {
+        Ok(ResolvedStorageConfig {
+            backend: self.backend.clone(),
+            bucket: self.bucket.resolve()?,
+            region: self.region.clone(),
+            endpoint: self.endpoint.as_ref().map(|e| e.resolve()).transpose()?,
+            public_url_base: self.public_url_base.resolve()?,
+        })
+    }
 }
 
 fn default_backend() -> String {
@@ -288,9 +311,10 @@ public_url_base = "https://assets.example.com"
         let config: RileyCmsConfig = toml::from_str(toml).unwrap();
         assert_eq!(config.content.repo_path, PathBuf::from("/data/repo"));
         assert_eq!(config.content.content_dir, "content"); // default
-        assert_eq!(config.storage.bucket, "my-bucket");
-        assert_eq!(config.storage.backend, "s3"); // default
-        assert_eq!(config.storage.region, "auto"); // default
+        let resolved = config.storage.resolve().unwrap();
+        assert_eq!(resolved.bucket, "my-bucket");
+        assert_eq!(resolved.backend, "s3"); // default
+        assert_eq!(resolved.region, "auto"); // default
         assert!(config.server.is_none());
         assert!(config.webhooks.is_none());
         assert!(config.auth.is_none());
@@ -326,9 +350,10 @@ api_token = "env:API_TOKEN"
 "#;
         let config: RileyCmsConfig = toml::from_str(toml).unwrap();
         assert_eq!(config.content.content_dir, "posts");
-        assert_eq!(config.storage.region, "us-east-1");
+        let resolved_storage = config.storage.resolve().unwrap();
+        assert_eq!(resolved_storage.region, "us-east-1");
         assert_eq!(
-            config.storage.endpoint,
+            resolved_storage.endpoint,
             Some("https://s3.amazonaws.com".to_string())
         );
 
@@ -354,6 +379,36 @@ api_token = "env:API_TOKEN"
         assert!(server.cors_origins.is_empty());
         assert_eq!(server.cache_max_age, 60);
         assert_eq!(server.cache_stale_while_revalidate, 300);
+    }
+
+    #[test]
+    fn test_storage_config_env_resolution() {
+        temp_env::with_vars(
+            [
+                ("TEST_BUCKET", Some("resolved-bucket")),
+                ("TEST_ENDPOINT", Some("https://resolved.endpoint.com")),
+                ("TEST_PUBLIC_URL", Some("https://resolved.cdn.com")),
+            ],
+            || {
+                let toml = r#"
+[content]
+repo_path = "/data/repo"
+
+[storage]
+bucket = "env:TEST_BUCKET"
+endpoint = "env:TEST_ENDPOINT"
+public_url_base = "env:TEST_PUBLIC_URL"
+"#;
+                let config: RileyCmsConfig = toml::from_str(toml).unwrap();
+                let resolved = config.storage.resolve().unwrap();
+                assert_eq!(resolved.bucket, "resolved-bucket");
+                assert_eq!(
+                    resolved.endpoint,
+                    Some("https://resolved.endpoint.com".to_string())
+                );
+                assert_eq!(resolved.public_url_base, "https://resolved.cdn.com");
+            },
+        );
     }
 
     #[test]

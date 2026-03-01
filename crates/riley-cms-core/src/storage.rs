@@ -1,6 +1,6 @@
 //! S3/R2 storage operations for riley_cms
 
-use crate::config::StorageConfig;
+use crate::config::{ResolvedStorageConfig, StorageConfig};
 use crate::error::{Error, Result};
 use crate::types::{Asset, AssetListOptions, AssetListResult};
 use aws_sdk_s3::Client;
@@ -11,36 +11,37 @@ use std::path::Path;
 /// Storage backend for assets
 pub struct Storage {
     client: Client,
-    config: StorageConfig,
+    config: ResolvedStorageConfig,
 }
 
 impl Storage {
     /// Create a new storage backend
     pub async fn new(config: &StorageConfig) -> Result<Self> {
+        let resolved = config.resolve()?;
         let mut aws_config_builder = aws_config::from_env();
 
         // Set custom endpoint for R2 or other S3-compatible storage
-        if let Some(endpoint) = &config.endpoint {
+        if let Some(endpoint) = &resolved.endpoint {
             aws_config_builder = aws_config_builder.endpoint_url(endpoint);
         }
 
         // Set region
         aws_config_builder =
-            aws_config_builder.region(aws_config::Region::new(config.region.clone()));
+            aws_config_builder.region(aws_config::Region::new(resolved.region.clone()));
 
         let aws_config = aws_config_builder.load().await;
         let client = Client::new(&aws_config);
 
         let storage = Self {
             client,
-            config: config.clone(),
+            config: resolved,
         };
 
         // Non-fatal connectivity check at startup
         if let Err(e) = storage.check_connectivity().await {
             tracing::warn!(
                 "S3 connectivity check failed for bucket '{}': {}. Asset operations may fail.",
-                config.bucket,
+                storage.config.bucket,
                 e
             );
         }
