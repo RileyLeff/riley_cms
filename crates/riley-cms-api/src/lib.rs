@@ -75,8 +75,6 @@ pub fn build_router(state: Arc<AppState>) -> Router {
     Router::new()
         // Versioned API routes
         .nest("/api/v1", api_v1_routes())
-        // Health check (unversioned)
-        .route("/health", get(handlers::health))
         // Git Smart HTTP routes (uses Basic Auth, not Bearer token)
         .route("/git/{*path}", any(handlers::git_handler))
         // Auth middleware - runs on all routes, sets AuthStatus in extensions
@@ -162,7 +160,11 @@ pub async fn serve(riley_cms: RileyCms) -> anyhow::Result<()> {
         .unwrap();
     let governor_layer = GovernorLayer::new(governor_conf);
 
-    let app = build_router(state).layer(governor_layer);
+    // Health check is excluded from rate limiting so container healthchecks
+    // work without proxy headers when behind_proxy is true.
+    let app = Router::new()
+        .route("/health", get(handlers::health))
+        .merge(build_router(state).layer(governor_layer));
 
     let addr: SocketAddr = format!("{}:{}", server_config.host, server_config.port).parse()?;
 
