@@ -126,6 +126,12 @@ pub struct ServerConfig {
     /// When false (default), uses the TCP peer address directly.
     #[serde(default)]
     pub behind_proxy: bool,
+    /// Rate limit: requests per second to refill per IP. Default: 50.
+    #[serde(default = "default_rate_limit_per_second")]
+    pub rate_limit_per_second: u64,
+    /// Rate limit: burst capacity per IP. Default: 200.
+    #[serde(default = "default_rate_limit_burst_size")]
+    pub rate_limit_burst_size: u32,
 }
 
 fn default_host() -> String {
@@ -144,6 +150,14 @@ fn default_cache_stale_while_revalidate() -> u32 {
     300
 }
 
+fn default_rate_limit_per_second() -> u64 {
+    50
+}
+
+fn default_rate_limit_burst_size() -> u32 {
+    200
+}
+
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
@@ -153,6 +167,8 @@ impl Default for ServerConfig {
             cache_max_age: default_cache_max_age(),
             cache_stale_while_revalidate: default_cache_stale_while_revalidate(),
             behind_proxy: false,
+            rate_limit_per_second: default_rate_limit_per_second(),
+            rate_limit_burst_size: default_rate_limit_burst_size(),
         }
     }
 }

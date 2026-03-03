@@ -145,8 +145,7 @@ pub async fn serve(riley_cms: RileyCms) -> anyhow::Result<()> {
 
     let state = Arc::new(AppState { riley_cms, config });
 
-    // Rate limiting: 50 burst capacity, replenish 10/second per IP.
-    // Allows normal browsing but prevents brute-force on auth endpoints.
+    // Rate limiting: configurable burst capacity and replenish rate per IP.
     // Applied here (not in build_router) because it requires real TCP peer IP.
     let key_extractor = RileyCmsKeyExtractor {
         behind_proxy: server_config.behind_proxy,
@@ -156,10 +155,15 @@ pub async fn serve(riley_cms: RileyCms) -> anyhow::Result<()> {
             "Rate limiter using proxy headers (X-Forwarded-For/X-Real-IP) for client IP"
         );
     }
+    tracing::info!(
+        "Rate limiter: {} req/sec, burst {}",
+        server_config.rate_limit_per_second,
+        server_config.rate_limit_burst_size,
+    );
     let governor_conf = GovernorConfigBuilder::default()
         .key_extractor(key_extractor)
-        .per_second(10)
-        .burst_size(50)
+        .per_second(server_config.rate_limit_per_second)
+        .burst_size(server_config.rate_limit_burst_size)
         .finish()
         .unwrap();
     let governor_layer = GovernorLayer::new(governor_conf);
